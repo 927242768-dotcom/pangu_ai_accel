@@ -127,30 +127,65 @@ K = 64
 
 任务：
 
-- [ ] 设计 GEMV DDR3 地址布局
-- [ ] 激活 `x` 写入 DDR3，并只读取/缓存一次
-- [ ] 4 行 packed INT4 权重连续写入 DDR3
-- [ ] 每行 K=64，拆成 4 个 MAC16 分块
-- [ ] 每行跨 4 个分块进行 INT32 累加
-- [ ] 生成 4 个 INT32 输出
-- [ ] 输出向量批量写回 DDR3
-- [ ] UART 返回整个输出向量
-- [ ] Python 对 4 个输出逐元素比较
-- [ ] 固定向量通过
-- [ ] 至少 1000 轮随机压力测试通过
-- [ ] PDS 全流程、时序和真实上板通过
+- [x] 设计 GEMV DDR3 地址布局
+- [x] 激活 `x` 写入 DDR3，并只读取/缓存一次
+- [x] 4 行 packed INT4 权重连续写入 DDR3
+- [x] 每行 K=64，拆成 4 个 MAC16 分块
+- [x] 每行跨 4 个分块进行 INT32 累加
+- [x] 生成 4 个 INT32 输出
+- [x] 输出向量批量写回 DDR3
+- [x] UART 返回整个输出向量
+- [x] Python 对 4 个输出逐元素比较
+- [x] 固定向量通过
+- [x] 至少 1000 轮随机压力测试通过
+- [x] PDS 全流程、时序和真实上板通过
+
+D1.1 验证证据（2026-07-23）：
+
+- 独立工程：`gemv_int4_m4k64`
+- Python 金标准自检：1000/1000 PASS，seed=`20260725`
+- 固定向量：FPGA `[1376, -1344, 416, 256]`，Python 完全一致
+- 真实上板随机压力测试：1000/1000 PASS，耗时约 19.70 秒
+- PDS：编译、综合、Device Map、布局布线、时序分析、位流生成全部成功
+- 布局布线：0 条未布线网络
+- 多角时序：`All Constraints Met`，慢速角 100 MHz WNS=`+0.983 ns`、TNS=`0`
+- 位流：`gemv_int4_m4k64/pnr/generate_bitstream/gemv_m4k64_top.sbit`
+- SHA256：`349a26b45362778849868e68475c5b8f6620bc8edb8375ebb237efbab4d352ed`
+- JTAG SRAM 下载：100%，`done bit=1`，未操作 Flash
 
 ### D1.2 扩展为参数化 GEMV
 
-- [ ] 支持运行时参数 `M` 和 `K`
-- [ ] `K` 不是 16 整数倍时支持尾块屏蔽
-- [ ] 支持更长的 AXI 256 bit burst
-- [ ] 权重行地址自动递增
-- [ ] 输出地址自动递增
-- [ ] 32 位累加溢出边界测试
-- [ ] UART 协议增加 GEMV 配置和启动命令
-- [ ] Python 工具可自动产生不同 M/K 的随机矩阵
-- [ ] 至少覆盖 `M={1,4,16,64}`、`K={16,64,256,896}` 的测试
+- [x] 支持运行时参数 `M` 和 `K`
+- [x] `K` 不是 16 整数倍时支持尾块屏蔽
+- [x] 支持更长的 AXI 256 bit burst
+- [x] 权重行地址自动递增
+- [x] 输出地址自动递增
+- [x] 32 位累加溢出边界测试
+- [x] UART 协议增加 GEMV 配置和启动命令
+- [x] Python 工具可自动产生不同 M/K 的随机矩阵
+- [x] 至少覆盖 `M={1,4,16,64}`、`K={16,64,256,896}` 的测试
+
+D1.2 验证证据（2026-07-23）：
+
+- 独立工程：`gemv_int4_param`，未覆盖固定 M4K64 已验证工程和位流
+- 支持范围：`1 <= M <= 64`、`1 <= K <= 896`
+- 激活读取：最多 16 拍 AXI burst，超过 16 拍自动分段；K=896 共 28 拍
+- 权重读取：按行 burst，行地址自动递增；输出每 8 个 INT32 一拍写回，地址自动递增
+- 尾块：最后一个 MAC16 分块按真实 K 显式屏蔽无效激活字节和 INT4 半字节
+- Python 金标准自检：1025 例 PASS，含标准尺寸、尾块尺寸和固定 M4K64 回归，seed=`20260728`
+- 多尺寸真实上板：24 种形状、72 例全部 PASS；标准组合完整覆盖 `M={1,4,16,64}`、`K={16,64,256,896}`
+- 尾块上板覆盖：`K={1,15,17,63,65,255,257,895}`
+- 固定 M4K64 回归：1000/1000 PASS，seed=`20260730`，约 19.89 秒
+- 尾块 M16K65：1000/1000 PASS，seed=`20260731`，约 105.27 秒
+- 近最大尾块 M4K895：100/100 PASS，seed=`20260801`，约 23.90 秒
+- INT32 边界：FPGA `[917504, -802816, 57344, 57344]` 与 Python 一致；当前范围理论绝对上界 `917504`
+- PDS：编译、综合、Device Map、布局布线、时序分析、位流生成全部成功，0 条未布线网络
+- 资源：LUT=`10715`、Register=`8136`、DRM18K=`4`、APM=`9`
+- 多角时序：`All Constraints Met`；慢速角 100 MHz WNS=`+0.682 ns`、TNS=`0`，WHS=`+0.086 ns`、THS=`0`
+- 快速角：WNS=`+3.137 ns`、TNS=`0`，WHS=`+0.001 ns`、THS=`0`
+- 位流：`gemv_int4_param/pnr/generate_bitstream/gemv_param_top.sbit`
+- SHA256：`90c67a74841826b358f4a4de5e0783c587de01a296d7991c3b2a8d3fc1bcd2a3`
+- JTAG SRAM 下载：100%，`done bit=1`，未操作 Flash
 
 ### D1.3 GEMV 性能基础设施
 
@@ -384,7 +419,15 @@ Python生成M×K INT4矩阵和K维INT8向量
 | `ddr_mac16_integration/rtl/int4_unpack16.v` | packed INT4 解包 |
 | `ddr_mac16_integration/pnr/build_ddr_mac16.tcl` | PDS 构建脚本 |
 | `ddr_mac16_integration/pnr/program_sram.tcl` | 仅下载 SRAM |
+| `gemv_int4_m4k64/rtl/gemv_m4k64_core.v` | 已验证固定 M=4、K=64 GEMV 核心 |
+| `gemv_int4_m4k64/rtl/gemv_m4k64_ctrl.v` | 已验证 GEMV UART、DDR3 与计算调度状态机 |
+| `gemv_int4_m4k64/pnr/build_gemv_m4k64.tcl` | 固定 GEMV PDS 构建脚本 |
+| `gemv_int4_param/rtl/gemv_param_core.v` | 已验证运行时 K、片上缓存、MAC16 分块和尾块屏蔽核心 |
+| `gemv_int4_param/rtl/gemv_param_ctrl.v` | 已验证运行时 M/K、UART、DDR3 行与输出地址调度 |
+| `gemv_int4_param/pnr/build_gemv_param.tcl` | 参数化 GEMV PDS 构建脚本 |
 | `tools/pangu_ddr_mac16_host.py` | INT8/INT4 上位机验证工具 |
+| `tools/pangu_gemv_m4k64_host.py` | M=4、K=64 GEMV 金标准与上板测试工具 |
+| `tools/pangu_gemv_param_host.py` | 参数化 GEMV 金标准、多尺寸、尾块、边界和压力测试工具 |
 | `model_tools/export_qwen25_fpga.py` | 模型转换工具 |
 | `model_tools/verify_p50_image.py` | 模型文件验证工具 |
 
@@ -403,9 +446,8 @@ Python生成M×K INT4矩阵和K维INT8向量
 ## 当前唯一下一任务（简明版）
 
 ```text
-建立独立的 GEMV 验证版本：M=4、K=64。
-激活读取一次，4行packed INT4权重连续读取；
-每行执行4次MAC16并跨分块INT32累加；
-返回4个输出，与Python逐元素比较；
-完成PDS时序和真实上板1000轮压力测试。
+进入 D1.3 GEMV 性能基础设施：在已上板验证的参数化 GEMV 中增加周期计数器。
+分别统计激活/权重 DDR3 读取周期、MAC 计算周期和单次 GEMV 总周期；
+通过 UART 返回计数值，并由 Python 计算实测带宽、GMAC/s 和 MAC 利用率。
+必须保持参数化功能、尾块尺寸和固定 M4K64 随机回归全部通过。
 ```

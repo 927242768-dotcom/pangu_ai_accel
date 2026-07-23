@@ -31,4 +31,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：从长度 16 点积扩展为通用 packed INT4 GEMV `y=W×x`
+- 当前阶段：运行时参数化 packed INT4 GEMV 已完成，支持 `1<=M<=64、1<=K<=896` 和尾块屏蔽；下一步实现 D1.3 GEMV 性能计数基础设施

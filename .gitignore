@@ -60,6 +60,8 @@ model_output/*.onnx
 **/*.gnr
 **/*.bgr
 **/*.last_generated
+**/*.pds
+**/impl.tcl
 
 # Local IP compiler/UI settings
 **/.settings
