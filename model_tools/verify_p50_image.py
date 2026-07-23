@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
-import struct
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,12 +13,8 @@ import numpy as np
 import torch
 from safetensors import safe_open
 
-from export_qwen25_fpga import (
-    HEADER_SIZE,
-    HEADER_STRUCT,
-    MAGIC,
-    build_lora_map,
-)
+from export_qwen25_fpga import build_lora_map
+from p50_format import P50Image
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -33,69 +27,6 @@ def sha256_file(path: Path) -> str:
         while chunk := handle.read(8 * 1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def read_header_and_metadata(path: Path) -> tuple[dict[str, int | bytes], dict[str, Any]]:
-    with path.open("rb") as handle:
-        raw = handle.read(HEADER_STRUCT.size)
-        if len(raw) != HEADER_STRUCT.size:
-            raise ValueError("文件过短，无法读取固定头")
-        fields = HEADER_STRUCT.unpack(raw)
-        header = {
-            "magic": fields[0],
-            "version": fields[1],
-            "header_size": fields[2],
-            "metadata_size": fields[3],
-            "data_offset": fields[4],
-            "tensor_count": fields[5],
-            "group_size": fields[6],
-            "flags": fields[7],
-            "reserved": fields[8],
-        }
-        if header["magic"] != MAGIC:
-            raise ValueError(f"魔数错误：{header['magic']!r}")
-        if header["header_size"] != HEADER_SIZE:
-            raise ValueError(f"头部大小异常：{header['header_size']}")
-        handle.seek(int(header["header_size"]))
-        metadata_raw = handle.read(int(header["metadata_size"]))
-        metadata = json.loads(metadata_raw.decode("utf-8"))
-    return header, metadata
-
-
-def validate_ranges(path: Path, header: dict[str, int | bytes], metadata: dict[str, Any]) -> None:
-    file_size = path.stat().st_size
-    tensors = metadata["tensors"]
-    if len(tensors) != header["tensor_count"]:
-        raise ValueError(
-            f"张量数量不一致：header={header['tensor_count']} metadata={len(tensors)}"
-        )
-    if metadata.get("image_size") != file_size:
-        raise ValueError(
-            f"镜像大小不一致：metadata={metadata.get('image_size')} actual={file_size}"
-        )
-    if metadata.get("data_offset") != header["data_offset"]:
-        raise ValueError("data_offset 在固定头和 JSON 中不一致")
-
-    ranges: list[tuple[int, int, str]] = []
-    for tensor in tensors:
-        name = tensor["name"]
-        data_start = int(tensor["data_offset"])
-        data_end = data_start + int(tensor["data_nbytes"])
-        if data_start < int(header["data_offset"]) or data_end > file_size:
-            raise ValueError(f"数据越界：{name}")
-        ranges.append((data_start, data_end, f"{name}:data"))
-
-        if "scale_offset" in tensor:
-            scale_start = int(tensor["scale_offset"])
-            scale_end = scale_start + int(tensor["scale_nbytes"])
-            if scale_start < int(header["data_offset"]) or scale_end > file_size:
-                raise ValueError(f"scale 越界：{name}")
-            ranges.append((scale_start, scale_end, f"{name}:scale"))
-
-    ranges.sort()
-    for previous, current in zip(ranges, ranges[1:]):
-        if current[0] < previous[1]:
-            raise ValueError(f"数据区重叠：{previous[2]} 与 {current[2]}")
 
 
 def decode_group(
@@ -197,6 +128,12 @@ def main() -> int:
         default=Path("model_output/yanbo_qwen25_0.5b_int4.p50"),
     )
     parser.add_argument(
+        "--metadata",
+        type=Path,
+        default=Path("model_output/yanbo_qwen25_0.5b_int4.json"),
+        help="与镜像内嵌目录逐字段比较的外部 JSON 元数据",
+    )
+    parser.add_argument(
         "--model-dir",
         type=Path,
         default=Path(r"D:\LLM\models\Qwen2.5-0.5B-Instruct"),
@@ -208,11 +145,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    header, metadata = read_header_and_metadata(args.image)
-    validate_ranges(args.image, header, metadata)
-    print("固定头与 JSON 索引：PASS")
-    print(f"张量数量：{header['tensor_count']}")
-    print(f"文件大小：{args.image.stat().st_size:,} 字节")
+    image = P50Image(args.image)
+    report = image.validate(args.metadata)
+    metadata = image.metadata
+    print("固定头、内嵌 JSON 索引与派生布局：PASS")
+    print("外部 JSON 与镜像内嵌 JSON：逐字段完全一致")
+    print(f"张量数量：{report.tensor_count}")
+    print(f"文件大小：{report.image_size:,} 字节")
     print(f"SHA256：{sha256_file(args.image)}")
 
     verify_quantization(

@@ -284,7 +284,70 @@ gemv_int4_perf
 
 性能结论：小尺寸和短 K 主要被 DDR3 命令/返回延迟限制；随着 M、K 增大，DDR3 burst 效率明显提高，最大尺寸的主要瓶颈转为单套 MAC16 每个 16 元素分块需要 4 个核心周期，后续性能优化应优先增加 MAC 并行度或让读取与计算重叠。
 
-## 八、当前项目状态
+## 八、本次新完成：D2 `.p50` 真实模型格式解析
+
+新增文件：
+
+```text
+model_tools/p50_format.py
+model_tools/p50_inspect.py
+model_tools/test_p50_format.py
+model_tools/README.md
+```
+
+完成能力：
+
+- 解析 48 字节小端固定头和 4096 字节固定头区域；
+- 解析镜像内嵌 JSON 张量目录；
+- 全量校验张量名称、shape、storage、data/scale 偏移和长度；
+- 按 shape 和 group size 重新推导 padded columns、group 数和实际字节数；
+- 检查所有张量数据 4 KiB 对齐、所有 scale 64 字节对齐；
+- 检查数据范围不越界且互不重叠；
+- 将外部 JSON 与镜像内嵌 JSON 逐字段比较；
+- 按张量名提取任意 INT4 行、跨 group 二维块或 FP16 行；
+- INT4 提取同时返回有符号量化值、相关 FP16 scales 和 FP32 反量化值。
+
+真实镜像解析结果：
+
+```text
+文件大小：263,857,920 字节
+SHA256：f0c0a22886499715fe16832b88ac59bff48fea8f3069c247437726aca6f19e9d
+magic：P50Q4V1\0
+version：1
+header_size：4096
+metadata_size：63716
+data_offset：528384
+tensor_count：290
+group_size：64
+```
+
+张量统计：
+
+- 169 个二维分组 INT4 张量；
+- 121 个连续 FP16 张量；
+- 外部 JSON 与内嵌 JSON 完全一致；
+- 全部目录、形状、偏移、长度、对齐和范围检查通过。
+
+真实量化格式：
+
+- 按输出行 row-major；
+- 每行输入列按 64 个元素分组；
+- 每字节低半字节保存较小列号，高半字节保存下一列；
+- 4 位二补码，导出范围 `[-7, 7]`；
+- 对称量化，zero point 固定为 0，不保存独立 zero point；
+- 每个 `[row, group]` 保存一个 FP16 scale；
+- 反量化公式为 `weight = int4_value * scale`。
+
+验证结果：
+
+- 独立微型镜像单元测试：5/5 PASS；
+- 真实 q_proj 完整行提取通过；
+- 真实 gate_proj 跨 group 二维块提取通过；
+- 真实 RMSNorm FP16 行提取通过；
+- 原 BF16 模型 + LoRA 软件参考的 4 组抽样反量化误差全部通过理论半 scale 上限检查；
+- 本阶段未修改 FPGA RTL、PDS 工程或已验证位流。
+
+## 九、当前项目状态
 
 当前已经完成四级真实闭环：
 
@@ -297,17 +360,17 @@ gemv_int4_perf
 
 这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、MAC16 分块循环、跨块 INT32 累加、自动地址调度、输出批量回写、性能计数和 Python 自动验证可以协同工作。
 
-当前仍是通用自定义 INT4 GEMV，不是完整 Qwen 推理，也尚未接入真实模型 scale、zero point 和张量布局。
+当前 FPGA 数据通路仍是通用自定义 INT4 GEMV，不是完整 Qwen 推理；真实模型的 group scale 和张量布局已在 Python 侧确认，但尚未接入 FPGA GEMV。
 
-## 九、下一阶段路线
+## 十、下一阶段路线
 
-### 当前唯一下一步：D2 真实量化格式与模型张量
+### 当前唯一下一步：D2 真实线性层量化软件参考
 
-1. 完整解析 `.p50` 文件头、张量目录和数据偏移。
-2. 验证 JSON 元数据与二进制张量目录、形状、偏移和长度完全一致。
-3. Python 工具能够按张量名提取任意一行或一个数据块。
-4. 明确真实 INT4 编码、分组大小、scale 和 zero point。
-5. 在格式确认前，不修改 FPGA GEMV 的量化缩放数据通路。
+1. 选择统一的激活量化格式。
+2. 定义 scale 的定点 Q 格式、饱和和舍入规则。
+3. 提取真实 `q_proj` 小切片，建立 INT4 权重、FP16 scale 和量化激活的软件端到端参考。
+4. 生成后续 FPGA GEMV 可直接使用的固定测试向量和误差阈值。
+5. 在软件参考和定点格式确认前，不修改 FPGA RTL。
 
 ### 后续算子
 

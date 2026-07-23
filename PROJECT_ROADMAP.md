@@ -241,16 +241,31 @@ Python生成M×K INT4矩阵和K维INT8向量
 
 目标：从“自定义随机 INT4”转向模型文件中的真实权重格式。
 
-- [ ] 完整解析 `.p50` 文件头、张量目录和数据偏移
-- [ ] 验证 JSON 元数据与二进制张量完全一致
-- [ ] 明确每个线性层的权重形状和存储顺序
-- [ ] 明确 INT4 编码方式、分组大小、scale 和 zero point
-- [ ] Python 可提取任意一行/一块真实模型权重
+- [x] 完整解析 `.p50` 文件头、张量目录和数据偏移
+- [x] 验证 JSON 元数据与二进制张量完全一致
+- [x] 明确每个线性层的权重形状和存储顺序
+- [x] 明确 INT4 编码方式、分组大小、scale 和 zero point
+- [x] Python 可提取任意一行/一块真实模型权重
 - [ ] FPGA GEMV 支持真实模型的分组反量化或定点缩放
 - [ ] 选择统一的激活量化格式
 - [ ] 定义 scale 的定点格式，例如 Q 格式
 - [ ] 验证一个真实线性层的小切片与 PyTorch/NumPy 一致
 - [ ] 验证一个完整真实线性层输出误差在规定范围内
+
+D2 模型格式解析验证证据（2026-07-23）：
+
+- 新增轻量解析库：`model_tools/p50_format.py`，只依赖 NumPy
+- 新增命令行工具：`model_tools/p50_inspect.py`，支持 `verify/summary/list/describe/row/block`
+- 真实镜像：`263,857,920` 字节，SHA256=`f0c0a22886499715fe16832b88ac59bff48fea8f3069c247437726aca6f19e9d`
+- 固定头：magic=`P50Q4V1\0`、version=`1`、header size=`4096`、metadata size=`63716`、data offset=`528384`
+- 张量目录：共 `290` 个，其中 `169` 个分组 INT4、`121` 个 FP16；名称唯一
+- 外部 JSON 与镜像内嵌 JSON：逐字段完全一致
+- 全量派生校验：shape、padded columns、groups、data/scale 长度、4 KiB/64 B 对齐、范围和互不重叠全部 PASS
+- 真实量化格式：每输出行 row-major、group size=`64`、低半字节在前、4 位二补码、范围 `[-7,7]`、FP16 scale、对称量化 zero point=`0`
+- 真实张量提取：完整 INT4 行、跨 group 二维块和 FP16 行均通过
+- 独立微型镜像单元测试：5/5 PASS
+- 原 BF16 + LoRA 软件参考抽样：4 组反量化误差全部位于理论半 scale 舍入上限内
+- 本阶段未修改 FPGA RTL、PDS 工程或任何已验证位流
 
 验收：至少完成模型中的一个完整 Linear 层，输出与软件量化参考一致。
 
@@ -454,7 +469,10 @@ Python生成M×K INT4矩阵和K维INT8向量
 | `tools/pangu_gemv_m4k64_host.py` | M=4、K=64 GEMV 金标准与上板测试工具 |
 | `tools/pangu_gemv_param_host.py` | 参数化 GEMV 金标准、多尺寸、尾块、边界、压力测试与性能分析工具 |
 | `model_tools/export_qwen25_fpga.py` | 模型转换工具 |
-| `model_tools/verify_p50_image.py` | 模型文件验证工具 |
+| `model_tools/p50_format.py` | `.p50` 固定头、目录、布局校验和按名提取解析库 |
+| `model_tools/p50_inspect.py` | `.p50` 摘要、目录查看、全量校验、行/块提取命令行工具 |
+| `model_tools/verify_p50_image.py` | 模型文件与源 BF16/LoRA 抽样量化验证工具 |
+| `model_tools/README.md` | `.p50` 格式、真实张量布局、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
 
@@ -471,8 +489,9 @@ Python生成M×K INT4矩阵和K维INT8向量
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 D2 真实量化格式与模型张量：先完整解析 .p50 文件头、张量目录和数据偏移。
-验证 JSON 元数据与二进制张量目录、形状、偏移和长度完全一致，
-并让 Python 工具能够按张量名提取任意一行或一个数据块。
-在完成真实模型格式确认前，不修改 FPGA GEMV 的量化缩放数据通路。
+继续 D2：建立真实线性层的 Python 量化软件参考。
+先选定统一的激活量化格式和 scale 定点 Q 格式，明确饱和、舍入和累加后的缩放公式；
+使用 p50_inspect/p50_format 提取真实 q_proj 小切片，完成“INT4 权重 + scale + 量化激活”的软件端到端参考，
+并形成 FPGA GEMV 分组缩放数据通路的精确定义和测试向量。
+在软件参考、误差阈值和定点格式确认前，不修改 FPGA RTL。
 ```
