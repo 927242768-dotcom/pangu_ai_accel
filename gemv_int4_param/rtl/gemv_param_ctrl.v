@@ -1,17 +1,19 @@
 `timescale 1ns/1ps
 
-// 运行时参数化 packed INT4 GEMV 控制器（D1.2 第一里程碑）。
+// 运行时参数化 packed INT4 GEMV 控制器（D1.3 性能计数版本）。
 //
 // 支持范围：
 //   1 <= M <= MAX_M
 //   1 <= K <= MAX_K，尾块不足 16 个元素时由硬件屏蔽
 //
 // UART 协议（115200 8N1）：
-//   I -> "PANGU50K GEMV PARAM V1\r\n"
+//   I -> "PANGU50K GEMV PARAM V2\r\n"
 //   S -> 'S' + 状态字节 + "\r\n"
 //   C + uint16_le(M) + uint16_le(K) -> 配置运行时尺寸，回复 "K\r\n"
 //   L + padded_x + padded_weight_rows -> 写入 DDR3，回复 "K\r\n"
 //   G -> 执行 GEMV，回复 'R' + M 个 little-endian int32
+//   P -> 读取性能计数，回复 'P' + 4 个 little-endian uint32：
+//        激活读取周期、权重读取周期、MAC 计算周期、GEMV 总周期
 //
 // 上传载荷按 256 bit 数据拍补零：
 //   padded_x            = ceil(K / 32) * 32 字节
@@ -83,6 +85,7 @@ localparam [5:0] ST_SEND_STATUS         = 6'd15;
 localparam [5:0] ST_SEND_ACK            = 6'd16;
 localparam [5:0] ST_SEND_RESULT         = 6'd17;
 localparam [5:0] ST_SEND_ERROR          = 6'd18;
+localparam [5:0] ST_SEND_PERF           = 6'd19;
 
 reg [5:0] state;
 reg [8:0] tx_index;
@@ -125,6 +128,23 @@ reg w_seen;
 reg ar_seen;
 reg [7:0] status_snapshot;
 reg [7:0] error_code;
+
+// D1.3 性能计数器。计数频率为 core_clk=100 MHz。
+// 激活/权重读取周期包含对应 AXI 地址准备、握手等待和数据返回状态；
+// MAC 周期只统计计算核心 busy 的周期；总周期从 G 命令进入执行流程开始，
+// 到最后一个结果数据拍写回 DDR3 完成为止，不包含 UART 返回耗时。
+reg        perf_active;
+reg        perf_valid;
+reg [31:0] perf_act_read_cycles;
+reg [31:0] perf_weight_read_cycles;
+reg [31:0] perf_mac_cycles;
+reg [31:0] perf_total_cycles;
+wire [127:0] perf_payload = {
+    perf_total_cycles,
+    perf_mac_cycles,
+    perf_weight_read_cycles,
+    perf_act_read_cycles
+};
 
 wire aw_handshake = axi_awvalid && axi_awready;
 wire ar_handshake = axi_arvalid && axi_arready;
@@ -244,7 +264,7 @@ function [7:0] info_char;
             6'd18: info_char = "M";
             6'd19: info_char = " ";
             6'd20: info_char = "V";
-            6'd21: info_char = "1";
+            6'd21: info_char = "2";
             6'd22: info_char = 8'h0d;
             6'd23: info_char = 8'h0a;
             default: info_char = 8'h00;
@@ -290,6 +310,12 @@ always @(posedge core_clk or negedge core_rst_n) begin
         ar_seen                 <= 1'b0;
         status_snapshot         <= 8'd0;
         error_code              <= 8'd0;
+        perf_active             <= 1'b0;
+        perf_valid              <= 1'b0;
+        perf_act_read_cycles    <= 32'd0;
+        perf_weight_read_cycles <= 32'd0;
+        perf_mac_cycles         <= 32'd0;
+        perf_total_cycles       <= 32'd0;
         protocol_error          <= 1'b0;
         config_valid            <= 1'b0;
         loaded                  <= 1'b0;
@@ -297,6 +323,16 @@ always @(posedge core_clk or negedge core_rst_n) begin
     end else begin
         tx_start   <= 1'b0;
         core_start <= 1'b0;
+
+        if (perf_active) begin
+            perf_total_cycles <= perf_total_cycles + 1'b1;
+            if ((state == ST_SETUP_ACT_READ) || (state == ST_READ_ACT))
+                perf_act_read_cycles <= perf_act_read_cycles + 1'b1;
+            if ((state == ST_SETUP_WEIGHT_READ) || (state == ST_READ_WEIGHT))
+                perf_weight_read_cycles <= perf_weight_read_cycles + 1'b1;
+            if (core_busy)
+                perf_mac_cycles <= perf_mac_cycles + 1'b1;
+        end
 
         case (state)
             ST_IDLE: begin
@@ -315,7 +351,7 @@ always @(posedge core_clk or negedge core_rst_n) begin
 
                         8'h53, 8'h73: begin // S / s
                             status_snapshot <= {
-                                3'd0, core_busy, result_valid, loaded,
+                                2'd0, perf_valid, core_busy, result_valid, loaded,
                                 config_valid, ddr_init_done
                             };
                             state <= ST_SEND_STATUS;
@@ -342,6 +378,7 @@ always @(posedge core_clk or negedge core_rst_n) begin
                                 load_beat_index <= 10'd0;
                                 loaded          <= 1'b0;
                                 result_valid    <= 1'b0;
+                                perf_valid      <= 1'b0;
                                 state           <= ST_RECV_LOAD;
                             end
                         end
@@ -360,14 +397,31 @@ always @(posedge core_clk or negedge core_rst_n) begin
                                 error_code     <= 8'h04;
                                 state          <= ST_SEND_ERROR;
                             end else begin
-                                result_valid        <= 1'b0;
-                                result_cache        <= {MAX_M*32{1'b0}};
-                                act_read_base_beat  <= 6'd0;
+                                result_valid           <= 1'b0;
+                                result_cache           <= {MAX_M*32{1'b0}};
+                                perf_active            <= 1'b1;
+                                perf_valid             <= 1'b0;
+                                perf_act_read_cycles   <= 32'd0;
+                                perf_weight_read_cycles<= 32'd0;
+                                perf_mac_cycles        <= 32'd0;
+                                perf_total_cycles      <= 32'd0;
+                                act_read_base_beat     <= 6'd0;
                                 read_beat_index     <= 5'd0;
                                 row_index           <= 7'd0;
                                 result_write_index  <= 4'd0;
                                 weight_row_addr     <= ADDR_WEIGHT;
                                 state               <= ST_SETUP_ACT_READ;
+                            end
+                        end
+
+                        8'h50, 8'h70: begin // P / p：读取最近一次 GEMV 性能计数
+                            if (!perf_valid) begin
+                                protocol_error <= 1'b1;
+                                error_code     <= 8'h06;
+                                state          <= ST_SEND_ERROR;
+                            end else begin
+                                tx_index <= 9'd0;
+                                state    <= ST_SEND_PERF;
                             end
                         end
 
@@ -404,6 +458,7 @@ always @(posedge core_clk or negedge core_rst_n) begin
                     config_valid     <= 1'b1;
                     loaded           <= 1'b0;
                     result_valid     <= 1'b0;
+                    perf_valid       <= 1'b0;
                     state            <= ST_SEND_ACK;
                 end else begin
                     config_valid   <= 1'b0;
@@ -566,6 +621,8 @@ always @(posedge core_clk or negedge core_rst_n) begin
                     w_seen      <= 1'b0;
                     if (result_write_index + 1'b1 == result_beats) begin
                         result_valid <= 1'b1;
+                        perf_active  <= 1'b0;
+                        perf_valid   <= 1'b1;
                         tx_index     <= 9'd0;
                         state        <= ST_SEND_RESULT;
                     end else begin
@@ -629,6 +686,21 @@ always @(posedge core_clk or negedge core_rst_n) begin
                             tx_data <= "R";
                         else
                             tx_data <= result_cache[(tx_index-1'b1)*8 +: 8];
+                        tx_start <= 1'b1;
+                        tx_index <= tx_index + 1'b1;
+                    end else begin
+                        state <= ST_IDLE;
+                    end
+                end
+            end
+
+            ST_SEND_PERF: begin
+                if (!tx_busy && !tx_start) begin
+                    if (tx_index < 9'd17) begin
+                        if (tx_index == 9'd0)
+                            tx_data <= "P";
+                        else
+                            tx_data <= perf_payload[(tx_index-1'b1)*8 +: 8];
                         tx_start <= 1'b1;
                         tx_index <= tx_index + 1'b1;
                     end else begin

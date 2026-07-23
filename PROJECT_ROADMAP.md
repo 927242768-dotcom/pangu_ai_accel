@@ -102,7 +102,7 @@ SHA256: e625e6dbe0e7f49915b41be805a970ea3977a72a6cb189f98c50497371b0af9f
 
 ---
 
-# 5. 当前唯一下一任务
+# 5. 阶段 D1：通用 packed INT4 GEMV（已完成）
 
 ## 阶段 D1：实现通用 packed INT4 GEMV `y = W × x`
 
@@ -189,12 +189,35 @@ D1.2 验证证据（2026-07-23）：
 
 ### D1.3 GEMV 性能基础设施
 
-- [ ] 统计 DDR3 读取周期
-- [ ] 统计 MAC 计算周期
-- [ ] 统计单次 GEMV 总周期
-- [ ] 增加性能计数器并可由上位机读取
-- [ ] 记录实测带宽、GMAC/s 和利用率
-- [ ] 明确瓶颈是 DDR3、MAC 数量还是控制开销
+- [x] 统计 DDR3 读取周期
+- [x] 统计 MAC 计算周期
+- [x] 统计单次 GEMV 总周期
+- [x] 增加性能计数器并可由上位机读取
+- [x] 记录实测带宽、GMAC/s 和利用率
+- [x] 明确瓶颈是 DDR3、MAC 数量还是控制开销
+
+D1.3 验证证据（2026-07-23）：
+
+- 独立构建目录：`gemv_int4_perf`，未覆盖 D1.2 已验证位流
+- 固件协议：升级为 `PANGU50K GEMV PARAM V2`，新增 `P` 命令返回 4 个 `uint32_le` 周期计数
+- 计数口径：激活读取、全部权重读取、核心 `busy` 计算周期，以及从激活读取开始到最后结果写回完成的总周期
+- Python 金标准与性能计算公式自检：1025 例 PASS，seed=`20260728`
+- M4K64 实测：激活读取 32 周期、权重读取 116 周期、MAC 64 周期、总计 244 周期；合并读取带宽 `129.73 MB/s`，核心 `0.4000 GMAC/s`，端到端 `0.1049 GMAC/s`，主瓶颈为 DDR3 读取
+- M16K65 尾块实测：33/480/320/919 周期；合并读取带宽 `218.32 MB/s`，核心 `0.3250 GMAC/s`，端到端 `0.1132 GMAC/s`，主瓶颈为 DDR3 读取
+- M64K896 最大尺寸实测：86/3152/14336/17912 周期；合并读取带宽 `913.16 MB/s`，核心 `0.4000 GMAC/s`，端到端 `0.3201 GMAC/s`，主瓶颈转为 MAC 数量/计算
+- MAC16 理论峰值按 16 路、100 MHz 计为 `1.6 GMAC/s`；最大尺寸核心利用率 `25.00%`，端到端利用率 `20.01%`
+- 多尺寸真实上板：24 种形状、72 例全部 PASS
+- 固定 M4K64：1000/1000 PASS，seed=`20260730`，约 19.79 秒
+- 尾块 M16K65：1000/1000 PASS，seed=`20260731`，约 105.26 秒
+- 近最大尾块 M4K895：100/100 PASS，seed=`20260801`，约 23.90 秒
+- INT32 边界：FPGA `[917504, -802816, 57344, 57344]` 与 Python 一致
+- PDS：编译、综合、Device Map、布局布线、时序分析、位流生成全部成功，0 条未布线网络
+- 资源：LUT=`10906`、Register=`8269`、DRM18K=`4`、APM=`9`
+- 多角时序：`All Constraints Met`；慢速角 100 MHz WNS=`+0.589 ns`、TNS=`0`，WHS=`+0.142 ns`、THS=`0`
+- 快速角：WNS=`+3.074 ns`、TNS=`0`，WHS=`+0.065 ns`、THS=`0`
+- 位流：`gemv_int4_perf/pnr/generate_bitstream/gemv_param_top.sbit`
+- SHA256：`a727f7427143b874da278ae83d7e8a2cdeff8b82bd7c0bb4361e7a2efed73c35`
+- JTAG SRAM 下载：100%，`done bit=1`，未操作 Flash
 
 ### D1 验收标准
 
@@ -424,10 +447,12 @@ Python生成M×K INT4矩阵和K维INT8向量
 | `gemv_int4_m4k64/pnr/build_gemv_m4k64.tcl` | 固定 GEMV PDS 构建脚本 |
 | `gemv_int4_param/rtl/gemv_param_core.v` | 已验证运行时 K、片上缓存、MAC16 分块和尾块屏蔽核心 |
 | `gemv_int4_param/rtl/gemv_param_ctrl.v` | 已验证运行时 M/K、UART、DDR3 行与输出地址调度 |
-| `gemv_int4_param/pnr/build_gemv_param.tcl` | 参数化 GEMV PDS 构建脚本 |
+| `gemv_int4_param/pnr/build_gemv_param.tcl` | 参数化 GEMV D1.2 PDS 构建脚本 |
+| `gemv_int4_perf/pnr/build_gemv_perf.tcl` | D1.3 性能计数独立 PDS 构建脚本，不覆盖 D1.2 位流 |
+| `gemv_int4_perf/README.md` | 性能计数口径、协议、实测结果和瓶颈结论 |
 | `tools/pangu_ddr_mac16_host.py` | INT8/INT4 上位机验证工具 |
 | `tools/pangu_gemv_m4k64_host.py` | M=4、K=64 GEMV 金标准与上板测试工具 |
-| `tools/pangu_gemv_param_host.py` | 参数化 GEMV 金标准、多尺寸、尾块、边界和压力测试工具 |
+| `tools/pangu_gemv_param_host.py` | 参数化 GEMV 金标准、多尺寸、尾块、边界、压力测试与性能分析工具 |
 | `model_tools/export_qwen25_fpga.py` | 模型转换工具 |
 | `model_tools/verify_p50_image.py` | 模型文件验证工具 |
 
@@ -446,8 +471,8 @@ Python生成M×K INT4矩阵和K维INT8向量
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 D1.3 GEMV 性能基础设施：在已上板验证的参数化 GEMV 中增加周期计数器。
-分别统计激活/权重 DDR3 读取周期、MAC 计算周期和单次 GEMV 总周期；
-通过 UART 返回计数值，并由 Python 计算实测带宽、GMAC/s 和 MAC 利用率。
-必须保持参数化功能、尾块尺寸和固定 M4K64 随机回归全部通过。
+进入 D2 真实量化格式与模型张量：先完整解析 .p50 文件头、张量目录和数据偏移。
+验证 JSON 元数据与二进制张量目录、形状、偏移和长度完全一致，
+并让 Python 工具能够按张量名提取任意一行或一个数据块。
+在完成真实模型格式确认前，不修改 FPGA GEMV 的量化缩放数据通路。
 ```

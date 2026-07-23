@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""盘古 PGL50H 运行时参数化 packed INT4 GEMV 验证工具。"""
+"""盘古 PGL50H 参数化 packed INT4 GEMV 验证与性能分析工具。"""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ except ImportError:  # pragma: no cover
 BAUD_RATE = 115200
 MAX_M = 64
 MAX_K = 896
+CORE_CLOCK_HZ = 100_000_000
+MAC_LANES = 16
 REGRESSION_M = (1, 4, 16, 64)
 REGRESSION_K = (16, 64, 256, 896)
 TAIL_REGRESSION_SHAPES = (
@@ -44,6 +46,7 @@ ERROR_MESSAGES = {
     0x03: "尚未配置有效的 M/K",
     0x04: "尚未加载 GEMV 输入和权重",
     0x05: "M/K 配置超出支持范围",
+    0x06: "尚无有效的 GEMV 性能计数",
     0xFF: "FPGA 状态机异常",
 }
 
@@ -55,6 +58,31 @@ class FpgaStatus:
     data_loaded: bool
     result_valid: bool
     core_busy: bool
+    perf_valid: bool
+
+
+@dataclass(frozen=True)
+class PerformanceCounters:
+    activation_read_cycles: int
+    weight_read_cycles: int
+    mac_cycles: int
+    total_cycles: int
+
+
+@dataclass(frozen=True)
+class PerformanceMetrics:
+    activation_bytes: int
+    weight_bytes: int
+    ddr_read_cycles: int
+    control_cycles: int
+    activation_bandwidth_mb_s: float
+    weight_bandwidth_mb_s: float
+    combined_bandwidth_mb_s: float
+    compute_gmac_s: float
+    end_to_end_gmac_s: float
+    compute_utilization_percent: float
+    end_to_end_utilization_percent: float
+    bottleneck: str
 
 
 def require_pyserial() -> None:
@@ -235,14 +263,16 @@ def command_status(port: "serial.Serial") -> FpgaStatus:
         data_loaded=bool(flags & 0x04),
         result_valid=bool(flags & 0x08),
         core_busy=bool(flags & 0x10),
+        perf_valid=bool(flags & 0x20),
     )
     print(
-        "DDR3初始化={}，配置有效={}，数据已加载={}，结果有效={}，计算核心忙={}".format(
+        "DDR3初始化={}，配置有效={}，数据已加载={}，结果有效={}，计算核心忙={}，性能计数有效={}".format(
             "是" if status.ddr_ready else "否",
             "是" if status.config_valid else "否",
             "是" if status.data_loaded else "否",
             "是" if status.result_valid else "否",
             "是" if status.core_busy else "否",
+            "是" if status.perf_valid else "否",
         )
     )
     return status
@@ -286,6 +316,122 @@ def run_loaded_gemv(port: "serial.Serial", m: int) -> list[int]:
     return list(struct.unpack(f"<{m}i", reply[1:]))
 
 
+def read_performance_counters(port: "serial.Serial") -> PerformanceCounters:
+    port.write(b"P")
+    reply = read_exact(port, 17)
+    raise_if_error_frame(reply)
+    if reply[0:1] != b"P":
+        raise RuntimeError(f"性能计数帧头错误：{reply[:16]!r}")
+    values = struct.unpack("<4I", reply[1:])
+    counters = PerformanceCounters(*values)
+    if counters.total_cycles == 0:
+        raise RuntimeError("FPGA 返回的 GEMV 总周期为 0")
+    return counters
+
+
+def calculate_performance_metrics(
+    counters: PerformanceCounters, m: int, k: int
+) -> PerformanceMetrics:
+    validate_shape(m, k)
+    for name, value in (
+        ("激活读取周期", counters.activation_read_cycles),
+        ("权重读取周期", counters.weight_read_cycles),
+        ("MAC 计算周期", counters.mac_cycles),
+        ("GEMV 总周期", counters.total_cycles),
+    ):
+        if value <= 0:
+            raise ValueError(f"{name}必须大于 0，当前为 {value}")
+
+    activation_bytes = ceil_div(k, 32) * 32
+    weight_bytes = m * ceil_div(k, 64) * 32
+    ddr_read_cycles = counters.activation_read_cycles + counters.weight_read_cycles
+    measured_cycles = ddr_read_cycles + counters.mac_cycles
+    if counters.total_cycles < measured_cycles:
+        raise ValueError(
+            "总周期小于 DDR3 读取周期与 MAC 周期之和，计数口径不一致"
+        )
+    control_cycles = counters.total_cycles - measured_cycles
+
+    def bandwidth_mb_s(byte_count: int, cycles: int) -> float:
+        return byte_count * CORE_CLOCK_HZ / cycles / 1_000_000.0
+
+    mac_count = m * k
+    compute_gmac_s = mac_count * CORE_CLOCK_HZ / counters.mac_cycles / 1_000_000_000.0
+    end_to_end_gmac_s = (
+        mac_count * CORE_CLOCK_HZ / counters.total_cycles / 1_000_000_000.0
+    )
+    peak_gmac_s = MAC_LANES * CORE_CLOCK_HZ / 1_000_000_000.0
+
+    cycle_groups = {
+        "DDR3 读取": ddr_read_cycles,
+        "MAC 数量/计算": counters.mac_cycles,
+        "控制与结果写回开销": control_cycles,
+    }
+    bottleneck = max(cycle_groups, key=cycle_groups.get)
+
+    return PerformanceMetrics(
+        activation_bytes=activation_bytes,
+        weight_bytes=weight_bytes,
+        ddr_read_cycles=ddr_read_cycles,
+        control_cycles=control_cycles,
+        activation_bandwidth_mb_s=bandwidth_mb_s(
+            activation_bytes, counters.activation_read_cycles
+        ),
+        weight_bandwidth_mb_s=bandwidth_mb_s(weight_bytes, counters.weight_read_cycles),
+        combined_bandwidth_mb_s=bandwidth_mb_s(
+            activation_bytes + weight_bytes, ddr_read_cycles
+        ),
+        compute_gmac_s=compute_gmac_s,
+        end_to_end_gmac_s=end_to_end_gmac_s,
+        compute_utilization_percent=compute_gmac_s / peak_gmac_s * 100.0,
+        end_to_end_utilization_percent=end_to_end_gmac_s / peak_gmac_s * 100.0,
+        bottleneck=bottleneck,
+    )
+
+
+def print_performance_report(
+    counters: PerformanceCounters, metrics: PerformanceMetrics, m: int, k: int
+) -> None:
+    total_us = counters.total_cycles / CORE_CLOCK_HZ * 1_000_000.0
+    print(f"性能计数：M={m}、K={k}，core_clk={CORE_CLOCK_HZ / 1e6:.0f} MHz")
+    print(
+        "  周期：激活读取={}，权重读取={}，MAC={}，总周期={}（{:.3f} us）".format(
+            counters.activation_read_cycles,
+            counters.weight_read_cycles,
+            counters.mac_cycles,
+            counters.total_cycles,
+            total_us,
+        )
+    )
+    print(
+        "  DDR3：激活 {:.2f} MB/s，权重 {:.2f} MB/s，合并 {:.2f} MB/s".format(
+            metrics.activation_bandwidth_mb_s,
+            metrics.weight_bandwidth_mb_s,
+            metrics.combined_bandwidth_mb_s,
+        )
+    )
+    print(
+        "  计算：核心阶段 {:.4f} GMAC/s，端到端 {:.4f} GMAC/s".format(
+            metrics.compute_gmac_s,
+            metrics.end_to_end_gmac_s,
+        )
+    )
+    print(
+        "  MAC16 利用率：核心阶段 {:.2f}% ，端到端 {:.2f}%".format(
+            metrics.compute_utilization_percent,
+            metrics.end_to_end_utilization_percent,
+        )
+    )
+    print(
+        "  周期构成：DDR3读取={}，MAC={}，控制/结果写回={}；当前主瓶颈={}".format(
+            metrics.ddr_read_cycles,
+            counters.mac_cycles,
+            metrics.control_cycles,
+            metrics.bottleneck,
+        )
+    )
+
+
 def run_case(
     port: "serial.Serial",
     x: Sequence[int],
@@ -325,6 +471,17 @@ def command_gemv(port: "serial.Serial", m: int, k: int) -> None:
     result = run_case(port, x, weights, m, k)
     print(f"M={m}、K={k} FPGA/Python 逐元素一致：PASS")
     print(f"输出前 16 项：{result[:16]}")
+
+
+def command_performance(port: "serial.Serial", m: int, k: int) -> None:
+    wait_until_ready(port)
+    x, weights = deterministic_case(m, k)
+    result = run_case(port, x, weights, m, k)
+    counters = read_performance_counters(port)
+    metrics = calculate_performance_metrics(counters, m, k)
+    print(f"M={m}、K={k} FPGA/Python 逐元素一致：PASS")
+    print(f"输出前 16 项：{result[:16]}")
+    print_performance_report(counters, metrics, m, k)
 
 
 def command_boundary(port: "serial.Serial") -> None:
@@ -446,6 +603,19 @@ def command_selftest(rounds: int, seed: int) -> None:
     verify_python_case(x, weights, 4, 64)
     checked += 1
 
+    # D1.3 性能公式自检：确保带宽、GMAC/s、利用率和瓶颈分类可计算。
+    sample_counters = PerformanceCounters(
+        activation_read_cycles=12,
+        weight_read_cycles=80,
+        mac_cycles=64,
+        total_cycles=180,
+    )
+    sample_metrics = calculate_performance_metrics(sample_counters, 4, 64)
+    if sample_metrics.control_cycles != 24:
+        raise RuntimeError("性能公式控制周期计算错误")
+    if sample_metrics.bottleneck != "DDR3 读取":
+        raise RuntimeError("性能公式瓶颈分类错误")
+
     print(
         f"Python 参数化金标准自检 PASS：{checked} 例，"
         f"含整数倍与尾块边界形状、固定 M4K64 回归，seed={seed}"
@@ -468,6 +638,12 @@ def build_parser() -> argparse.ArgumentParser:
     gemv_parser = subparsers.add_parser("gemv", help="执行一次确定性参数化 GEMV")
     gemv_parser.add_argument("--m", type=int, default=4)
     gemv_parser.add_argument("--k", type=int, default=64)
+
+    perf_parser = subparsers.add_parser(
+        "perf", help="执行一次 GEMV 并读取周期、带宽、GMAC/s 和利用率"
+    )
+    perf_parser.add_argument("--m", type=int, default=4)
+    perf_parser.add_argument("--k", type=int, default=64)
 
     stress_parser = subparsers.add_parser("stress", help="指定 M/K 的真实 FPGA 随机压力测试")
     stress_parser.add_argument("--m", type=int, default=4)
@@ -517,6 +693,9 @@ def main() -> int:
         elif args.command == "gemv":
             validate_shape(args.m, args.k)
             command_gemv(port, args.m, args.k)
+        elif args.command == "perf":
+            validate_shape(args.m, args.k)
+            command_performance(port, args.m, args.k)
         elif args.command == "stress":
             validate_shape(args.m, args.k)
             if args.rounds <= 0:
