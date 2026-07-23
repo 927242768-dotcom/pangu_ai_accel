@@ -1,0 +1,89 @@
+{
+  "format_version": 1,
+  "weight_tensor": "model.layers.0.self_attn.q_proj.weight",
+  "bias_tensor": "model.layers.0.self_attn.q_proj.bias",
+  "slice": {
+    "row_start": 0,
+    "row_count": 4,
+    "column_start": 0,
+    "column_count": 896,
+    "group_size": 64
+  },
+  "activation_format": {
+    "scheme": "symmetric_per_vector",
+    "dtype": "int8",
+    "range": [
+      -127,
+      127
+    ],
+    "zero_point": 0,
+    "rounding": "round_to_nearest_even",
+    "scale_formula": "max(abs(x)) / 127; all-zero vector uses 1.0",
+    "scale": 0.0314826064222441,
+    "clipped_count": 0,
+    "generator": "32-bit LCG mapped to exact multiples of 1/8192",
+    "seed": 20260723
+  },
+  "fixed_scale_format": {
+    "name": "UQ4.28",
+    "storage_bits": 32,
+    "fraction_bits": 28,
+    "rounding": "round_to_nearest_even",
+    "saturation_range": [
+      0,
+      4294967295
+    ],
+    "saturated_count": 0,
+    "formula": "round_rne(activation_scale * weight_scale * 2^28)"
+  },
+  "output_format": {
+    "storage": "signed_int64",
+    "fraction_bits": 28,
+    "formula": "bias_q28 + sum(group_acc_int32 * combined_scale_uq4_28)"
+  },
+  "expected": {
+    "output_p50_float": [
+      0.7752590202726424,
+      -0.6386315780691803,
+      1.0810645017772913,
+      -0.8347725509665906
+    ],
+    "output_quantized_float": [
+      0.7720806824454055,
+      -0.6458171610977117,
+      1.0714217222875027,
+      -0.831578598394404
+    ],
+    "output_fixed_q28": [
+      207253689,
+      -173360554,
+      287606739,
+      -223225713
+    ],
+    "output_fixed_float": [
+      0.7720801569521427,
+      -0.6458183899521828,
+      1.0714185945689678,
+      -0.8315805830061436
+    ],
+    "fixed_error_bound": [
+      2.61012464761734e-05,
+      3.520958125591278e-05,
+      3.82009893655777e-05,
+      3.6230310797691345e-05
+    ],
+    "max_activation_quantization_error": 0.009642779489788644,
+    "max_fixed_scale_error": 3.1277185348344005e-06,
+    "max_fixed_error_bound": 3.82009893655777e-05
+  },
+  "sha256": {
+    "activation_float32": "71dfd0c932ad5a098ad7b38d07a6e1fc94f3effbb822bc907a4639f454849e7e",
+    "activation_int8": "2cd260ee0cfac02fb03f64e28eedeb2a929b868a028d61f4c4f0842edbcf5d76",
+    "packed_weight_int4": "0f1d447eb5e83a84692e21242ea84a553609542d838b9aff0f1ea8788fa5725a",
+    "weight_scale_float16": "ab9125af847d0c362a09dcb40eac7207f4b284fd47544f53acab3653399b6ac0",
+    "group_accumulator_int32": "a451606918926c1bf7e0dbb32443dc02be9f8fd9bdebe5d395f810a2799c82c0",
+    "combined_scale_uq4_28": "7a4683467bf9505542ce3252e68abf28574524df4254bc94833f1da76a5fbd6b",
+    "bias_q28": "4f367ae54430018e6903465d184bdbbd804c4dba694f24d769a23f5b13f70d9b",
+    "output_fixed_q28": "ed96a63be2c39ad799e91954c902de36f0e3bf62fb977767151d73a662f6d4c8"
+  }
+}

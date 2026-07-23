@@ -99,7 +99,10 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `p50_format.py` | 轻量解析库；校验头、目录、长度、偏移并提取张量 |
 | `p50_inspect.py` | 摘要、目录查看、全量校验、行/块提取 CLI |
 | `verify_p50_image.py` | 在结构全量校验基础上，对照源模型抽样验证量化误差 |
+| `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
+| `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
+| `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
 
 ## 6. 常用命令
 
@@ -157,7 +160,65 @@ INT4 提取结果的 NPZ 包含：
 
 FP16 提取结果主要包含原始 `values` 和范围元数据。
 
-## 7. 验证结果
+生成真实 layer0 `q_proj` 的固定 M=4、K=896 软件参考：
+
+```bat
+python model_tools\linear_quant_reference.py ^
+  --output extracted\q_proj_m4k896.npz ^
+  --manifest extracted\q_proj_m4k896.json
+```
+
+完整 NPZ 包含 FPGA 后续可直接使用的激活 INT8、packed INT4 权重、FP16 weight scale、分组 INT32 累加、UQ4.28 组合 scale、bias Q28 和预期输出。仓库只提交小型 JSON 清单，完整 NPZ 可由真实 `.p50` 镜像确定性重建。
+
+## 7. 真实 Linear 量化与定点定义
+
+### 7.1 激活格式
+
+统一采用逐向量对称 INT8：
+
+```text
+qmin/qmax = -127 / 127
+zero_point = 0
+activation_scale = max(abs(x)) / 127
+q_x = saturate[-127,127](round_rne(x / activation_scale))
+```
+
+全零向量使用 `activation_scale=1.0`，仍可精确表示。所有舍入统一为 round-to-nearest-even（RNE）。
+
+### 7.2 分组缩放
+
+每个输出行、每个 64 元素 group 先计算：
+
+```text
+acc[row,group] = sum(q_weight_int4 * q_activation_int8)
+```
+
+主机将激活 scale 和 `.p50` FP16 weight scale 合并：
+
+```text
+combined_scale = activation_scale * weight_scale[row,group]
+combined_scale_q28 = saturate_u32(round_rne(combined_scale * 2^28))
+```
+
+`combined_scale_q28` 使用 32 位无符号 `UQ4.28`，范围 `[0, 16)`，无需 FPGA 解析 FP16。
+
+### 7.3 输出格式
+
+bias 也转换为带 28 位小数的有符号整数。FPGA 数据通路定义为：
+
+```text
+output_q28[row] = bias_q28[row]
+                + sum(acc[row,group] * combined_scale_q28[row,group])
+output_float = output_q28 / 2^28
+```
+
+分组点积使用 INT32，乘法和跨组累加使用有符号 INT64。由于组合 scale 的量化误差不超过半个 LSB，逐行理论误差上界为：
+
+```text
+fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
+```
+
+## 8. 验证结果
 
 2026-07-23 在真实 251.63 MiB 镜像上完成：
 
@@ -172,3 +233,21 @@ FP16 提取结果主要包含原始 `values` 和范围元数据。
 - 对照原 BF16 模型和已合并 LoRA 的 4 组抽样反量化误差全部位于理论半 scale 舍入上限内。
 
 此阶段只确认真实模型文件格式和软件提取能力，没有修改 FPGA GEMV RTL、PDS 工程或已验证位流。
+
+2026-07-23 继续完成真实 Linear 量化软件参考：
+
+- 真实张量：`model.layers.0.self_attn.q_proj.weight` 与 bias；
+- 切片：输出行 `0..3`，完整输入列 `0..895`，即 M=4、K=896、14 个 group；
+- 固定激活：32 位 LCG，seed=`20260723`，输入值为 `1/8192` 的整数倍；
+- 激活 scale：`0.0314826064222441`，INT8 饱和数为 0；
+- 组合 scale 范围：`0.0001496403793 .. 0.0004270635545`，UQ4.28 饱和数为 0；
+- P50 浮点基线：`[0.7752590203, -0.6386315781, 1.0810645018, -0.8347725510]`；
+- 量化激活浮点参考：`[0.7720806824, -0.6458171611, 1.0714217223, -0.8315785984]`；
+- 定点 Q28：`[207253689, -173360554, 287606739, -223225713]`；
+- 定点反量化：`[0.7720801570, -0.6458183900, 1.0714185946, -0.8315805830]`；
+- 激活量化最大绝对误差：`0.0096427795`；
+- UQ4.28 最大绝对误差：`3.1277186e-6`，理论上界 `3.8200990e-5`；
+- 原有解析测试与新增测试共 13/13 PASS；
+- 随机软件压力测试：1000/1000 PASS，seed=`20260723`；
+- 固定向量清单：`q_proj_m4k896_reference.json`，记录关键数组 SHA256；
+- 本轮仍未修改 FPGA RTL、PDS 工程或任何已验证位流。
