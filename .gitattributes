@@ -1,0 +1,16 @@
+* text=auto
+
+*.v text eol=lf
+*.vh text eol=lf
+*.vp text eol=lf
+*.tcl text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.fdc text eol=lf
+*.json text eol=lf
+
+*.p50 binary
+*.sbit binary
+*.smsk binary
+*.png binary
+*.jpg binary

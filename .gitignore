@@ -1,0 +1,75 @@
+# DevSpace / editor temporary files
+.devspace-computer/
+.vscode/
+.idea/
+*.swp
+*.tmp
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Large model binaries: keep metadata JSON, do not commit weights
+model_output/*.p50
+model_output/*.bin
+model_output/*.safetensors
+model_output/*.pt
+model_output/*.pth
+model_output/*.onnx
+
+# FPGA programming files and generated netlists
+**/*.sbit
+**/*.smsk
+**/*.bit
+**/*.bin
+**/*.jed
+**/*.sdf
+**/*.vm
+**/*.netlist
+
+# Pango PDS generated databases and reports
+**/compile/
+**/constraint_check/
+**/device_map/
+**/generate_bitstream/
+**/generate_netlist/
+**/place_route/
+**/report_timing/
+**/synthesize/
+**/ip_import/
+**/log/
+**/logbackup/
+**/bak/
+**/sim_lib/
+
+**/*.adf
+**/*.db
+**/*.prt
+**/*.prr
+**/*.pcf
+**/*.ppf
+**/*.pps
+**/*.ppr
+**/*.pvf
+**/*.snr
+**/*.dmr
+**/*.cmr
+**/*.gnr
+**/*.bgr
+**/*.last_generated
+
+# Local IP compiler/UI settings
+**/.settings
+
+# Build logs, locks and generated summaries
+**/*.log
+**/*.lock
+**/multiseed_summary.csv
+stderr.log
+stdout.log
+
+# Temporary screenshots made during board programming
+**/cdt_assign_*.png
