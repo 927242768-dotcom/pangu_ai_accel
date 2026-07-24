@@ -1,0 +1,126 @@
+{
+  "format_version": 1,
+  "definition": {
+    "model": "Qwen2.5-0.5B layer0",
+    "complete_path": "hidden Q6.10 -> RMSNorm -> QKV -> RoPE -> score -> softmax -> probability*V -> O_proj Q28 -> residual",
+    "residual_input": "signed int16 Q6.10 [896]",
+    "oproj_input": "signed int64 Q28 [896]",
+    "oproj_rescale": "signed RNE right shift 18, then signed int16 saturation",
+    "residual_add": "sign-extended Q6.10 add, then signed int16 saturation",
+    "output": "signed int16 Q6.10 [896]",
+    "upload_bytes": 8960,
+    "result_bytes": 1792,
+    "fixed_queries": [
+      0,
+      1,
+      5,
+      15
+    ]
+  },
+  "cases": [
+    {
+      "label": "layer0 coherent attention query=0, window=0..0",
+      "query_position": 0,
+      "window_start": 0,
+      "count": 1,
+      "hidden_seed_base": 20260806,
+      "oproj_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "sha256": {
+        "residual_hidden_q10": "26139d5cacc3a2c2cf018016f370effd02e043b0d2155f89573463683fba80f0",
+        "scores_q28": "c7d42e6db77f96262c8c2fe4df067d93b42c4afb4a5d63e977aad36c4cca7cf4",
+        "probabilities_q31": "768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608",
+        "attention_concat_q28": "59810b7a6d37adc1080a534d6538bdee5b550e8dbc8aea8078c908bd520b42a7",
+        "oproj_q28": "b859fcbcab83cf2bf48a462639b4080a394eab2f975deeba91c3eb91bf938bf9",
+        "oproj_q10": "6109a5fdf6dd2b9a5294343a219b74fbcdb9518560d3daa6b859c18efb2b4a4d",
+        "output_q10": "36859690e421b96cb8db65a5760a364d165a73b63fd1121040a7d1b42c042eb7",
+        "upload_payload": "23ccdedd76a38c219f46efa0eed3272ae52ba89b3838a14584937cfb5f9223ca"
+      },
+      "preview": {
+        "residual_first8_q10": [-1508, -4014, 2075, 464, -2511, 1212, 688, 1328],
+        "oproj_first8_q28": [-4872503, -2900469, -1025013, -2614115, -1390695, -3219683, -1575820, -605083],
+        "oproj_first8_q10": [-19, -11, -4, -10, -5, -12, -6, -2],
+        "output_first8_q10": [-1527, -4025, 2071, 454, -2516, 1200, 682, 1326],
+        "output_last8_q10": [-1019, 198, -3515, -910, -3517, -2823, 381, -1999]
+      }
+    },
+    {
+      "label": "layer0 coherent attention query=1, window=0..1",
+      "query_position": 1,
+      "window_start": 0,
+      "count": 2,
+      "hidden_seed_base": 20260806,
+      "oproj_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "sha256": {
+        "residual_hidden_q10": "9e0c5cd6a4d47abe9d71b7db81e17570fda83231c0ed756105852645f42f89d2",
+        "scores_q28": "61e2a1db1c7be6b1e8e2c370f0889c23bbcd8d7b6e62c2553d6b931a45fc0de4",
+        "probabilities_q31": "d033d25c97f296a92cd84bb199c8377c37f6dba23893e39e3c6cbf3910d124a2",
+        "attention_concat_q28": "ff5cac556f3d0209fe4fd2e18ebae6d6db394a0ebbc7e3f9bf14cc169b81dd84",
+        "oproj_q28": "e3ca31d504dd41c8f7ebe0273bc90e480206e8e9b821397ca1bf5e9c2351f2e6",
+        "oproj_q10": "c3fa2156638c1cf23c12548d2772f2f83e04b9df5cb1816857aaf1e4b7e9a5ff",
+        "output_q10": "2b4a2d9240e6e30c2afe2943fa30ac60decd47f8fc8d377ab7e530e516009378",
+        "upload_payload": "b1fad855d9ba0375292e58f682fe6311f8912107f920b3f8699f5d6601d5ef20"
+      },
+      "preview": {
+        "residual_first8_q10": [-696, -2210, -3780, -3827, 2530, -3589, 3518, -2480],
+        "oproj_first8_q28": [-6560097, -3259291, -1105340, -1624920, -1250889, -4660880, -2266582, -761214],
+        "oproj_first8_q10": [-25, -12, -4, -6, -5, -18, -9, -3],
+        "output_first8_q10": [-721, -2222, -3784, -3833, 2525, -3607, 3509, -2483],
+        "output_last8_q10": [1092, 119, -3078, -2794, -3474, 974, 1929, 3934]
+      }
+    },
+    {
+      "label": "layer0 coherent attention query=5, window=0..5",
+      "query_position": 5,
+      "window_start": 0,
+      "count": 6,
+      "hidden_seed_base": 20260806,
+      "oproj_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "sha256": {
+        "residual_hidden_q10": "ac7b873d31ec3015c8ce4875a32207b59d6db212f625864bf2a09b24b8bf6d41",
+        "scores_q28": "91a94fff5799830812dbbd131dfdf7e3c359872c9b2b505179665dddf058ab1d",
+        "probabilities_q31": "3879e44468fda4e9adf5439c3f5497c74dd8c1cc3e90932455ed37d7ac8f0618",
+        "attention_concat_q28": "af8f7a4acba0a3a24b8a67ffff0cbf7b0dcae33edc3464c6bcd6a054cccb9937",
+        "oproj_q28": "1dd906ff3628ee27b5053c338de772e30a339406329b7a16660175755b9c112f",
+        "oproj_q10": "61308da300b11f9741fd7581fc8a62e994dd2c981f8a243a418339ab92ce560d",
+        "output_q10": "c0c0776d71e3dc97aa1a4d4e0709f38441cc82717c0c3081a79c47c30a21af10",
+        "upload_payload": "3445b383125a9cb4b47dbef5b3db073bfc03680cbacac2627b1bfb2ef4b09e7b"
+      },
+      "preview": {
+        "residual_first8_q10": [2555, -3188, -2622, 3585, -1882, 1785, -1545, -1328],
+        "oproj_first8_q28": [-3150641, 1196041, -1492173, 927361, -567665, -4684025, -1595519, 707986],
+        "oproj_first8_q10": [-12, 5, -6, 4, -2, -18, -6, 3],
+        "output_first8_q10": [2543, -3183, -2628, 3589, -1884, 1767, -1551, -1325],
+        "output_last8_q10": [1326, -198, -1340, -2150, -3298, -257, -28, 3046]
+      }
+    },
+    {
+      "label": "layer0 coherent attention query=15, window=0..15",
+      "query_position": 15,
+      "window_start": 0,
+      "count": 16,
+      "hidden_seed_base": 20260806,
+      "oproj_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "sha256": {
+        "residual_hidden_q10": "61189abfbe5ecbad6a91aad5b4d3965010872e2479ba875f2a61516efc6c5bf4",
+        "scores_q28": "418dae77dd48b568a550805e8172481cac9aa370b13930908d2147cfecd92b92",
+        "probabilities_q31": "0fe1ff7ff4a2c75ac246a0dbe574824ef5f86c55060dc80d0a3fb1423260ba19",
+        "attention_concat_q28": "49920fc9a3433176de478032d619e607ddb4b1881be55a4bc5a2c21adb5ceacb",
+        "oproj_q28": "84083392101f82f209910df028d094c81c338ffeb57fcb72e30e3e13110df935",
+        "oproj_q10": "6ace8d7f985360debd865438fbd59e1a4609572112a5d7451eb0a9dec7ba2fc2",
+        "output_q10": "7e61dc1fd0eb43b231e25fe1d08b1c08342723f537b6e25924858608235fa61e",
+        "upload_payload": "ba569fb94e31160aa9045036da445d3aea6d3e000def82fd2d619025297ea04e"
+      },
+      "preview": {
+        "residual_first8_q10": [2491, -1536, -3825, 1635, -623, 2930, 2181, 1552],
+        "oproj_first8_q28": [-2399352, -2701750, -1617701, 2336778, 1072492, -3082047, -1325625, -775340],
+        "oproj_first8_q10": [-9, -10, -6, 9, 4, -12, -5, -3],
+        "output_first8_q10": [2482, -1546, -3831, 1644, -619, 2918, 2176, 1549],
+        "output_last8_q10": [-2154, -993, 2996, 3545, -2842, -3280, -807, -3216]
+      }
+    }
+  ]
+}

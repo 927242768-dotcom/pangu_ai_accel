@@ -23,10 +23,11 @@
 17. [`softmax_f5/README.md`](softmax_f5/README.md)：已验证的 mask 感知 Softmax、PWL exp、Q31 倒数和概率归一化闭环。
 18. [`attention_output_f6/README.md`](attention_output_f6/README.md)：已验证的 F5 概率×F3 V、14Q/2KV GQA、Q59 累加、RNE 和 `[14,64]/[896]` Attention 输出闭环。
 19. [`attention_oproj_f6/README.md`](attention_oproj_f6/README.md)：已验证的 F6 `[896]` Attention 输入量化、真实 layer0 O_proj M896K896 分组 INT4 和 signed int64 Q28 闭环。
+20. [`attention_residual_f6/README.md`](attention_residual_f6/README.md)：已验证的完整 layer0 Attention 连贯软件链、Q28→Q6.10 重标定和第一处残差闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和与真实 O_proj 的多级计算闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj 与第一处残差的完整 layer0 Attention 子层闭环：
 
 ```text
 长度16单点积：
@@ -72,13 +73,15 @@ F6 Attention 输出的第一段现已完成。独立工程 `attention_output_f6`
 
 F6 Attention O_proj 现已完成。独立工程 `attention_oproj_f6` 将第一段真实 `[896]` signed int64 Q28 拼接结果按逐向量对称规则量化为 INT8，读取真实 `model.layers.0.self_attn.o_proj.weight=[896,896]` 的 groupwise signed INT4 权重和 FP16 scale；真实 `.p50` 不含 O_proj bias，因此硬件 bias 全 0。四组 1/2/6/16-token 固定输入的 896 个输出全部上板逐位一致；完整软件回归 `100/100 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡随机/边界 `4/4 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.614 ns`、TNS=0、hold WHS=`+0.171 ns`、THS=0；位流 SHA256=`017517f877f29e62d945ecd3ae4ba22c2d690b6e6b92778eb0502ba7ac115533`。
 
+F6 Attention 残差与完整子层现已完成。独立工程 `attention_residual_f6` 将真实 O_proj `[896]` signed int64 Q28 使用 signed RNE 右移 18 位并饱和到 signed Q6.10，再与对应原 hidden state 扩展相加并再次饱和。软件端首次建立同一批 hidden state 连贯经过 input RMSNorm、Q/K/V、RoPE、Score、Softmax、V 加权、多头拼接、O_proj 和残差的完整 layer0 Attention 参考链。1/2/6/16-token 四组固定输出全部上板逐位一致；完整软件回归 `105/105 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡随机/边界累计 `300/300 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+1.493 ns`、TNS=0、hold WHS=`+0.112 ns`、THS=0；位流 SHA256=`609e1f569aa1e4579cffb995b0d7d0bc89fa34529790b35e8b26d6778226bcbd`。
+
 ## 当前唯一下一任务
 
 ```text
-继续 F6：把已经真实上板逐位通过的 layer0 O_proj `[896]` signed int64 Q28 输出，与对应的
-Attention 输入 hidden state 建立残差连接，并形成完整 layer0 Attention 子层的软件参考和独立
-硬件闭环。必须先明确统一定点格式、量化/重标定边界和 signed 饱和规则；可复用已验证的
-`elementwise_k896` 残差能力，但不得覆盖 O_proj 或更早工程。完整 Attention 子层通过前不得进入 MLP。
+进入 G1 MLP：先完成 layer0 post_attention_layernorm。输入为已经真实上板逐位通过的完整
+Attention 子层 `[896]` signed Q6.10 输出，读取真实 post_attention_layernorm.weight，复用但隔离
+已验证 RMSNorm 定点能力，建立连贯 MLP 输入软件参考和独立硬件闭环。该归一化通过前不得进入
+gate/up projection。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。
