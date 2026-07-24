@@ -571,9 +571,75 @@ UART 上传 4608 B
 
 时序优化过程：首版 rsqrt 常数校正、动态移位和后级乘法串联导致慢角 WNS=`-4.219 ns`；拆分 rsqrt 流水后提升至 `-0.968 ns`。继续为输入平方与累加、输出 RNE/饱和/打包增加寄存边界后，最终慢角 WNS 收敛到 `+0.374 ns`，所有角落 TNS=0。
 
-## 十三、当前项目状态
+## 十三、2026-07-24 新完成：E2 K=896 元素级运算
 
-当前已经完成七级真实闭环：
+新增独立工程、软件参考、固定清单和上位机：
+
+```text
+model_tools/elementwise_fixed_reference.py
+model_tools/test_elementwise_fixed_reference.py
+model_tools/elementwise_k896_reference.json
+elementwise_k896/rtl/elementwise_k896_core.v
+elementwise_k896/rtl/elementwise_k896_ctrl.v
+elementwise_k896/rtl/elementwise_k896_top.v
+elementwise_k896/pnr/build_elementwise_k896.tcl
+elementwise_k896/pnr/program_sram.tcl
+elementwise_k896/pnr_seed17/run_seed17.tcl
+elementwise_k896/pnr_seed17/program_sram.tcl
+elementwise_k896/README.md
+tools/pangu_elementwise_k896_host.py
+```
+
+统一格式和操作：
+
+- 输入 A/B、标量 scale、SiLU 端点和输出均为 signed Q6.10 int16；
+- 残差加法使用扩展加法和显式 signed int16 饱和；
+- 定点缩放与元素乘法使用 signed Q12.20 乘积、RNE 右移 10 位和显式饱和；
+- SiLU 第一版采用覆盖 `[-8,8)` 的 64 段端点 PWL，区间外采用 `x<-8 -> 0`、`x>=8 -> x`。
+
+完整 65536 个 int16 输入域上的 SiLU 比较：
+
+- 2048 项中点直接 LUT：最大误差 5 Q10 LSB，平均误差 0.352692 LSB，表容量 32768 bit；
+- 64 段端点 PWL：最大误差 4 Q10 LSB，平均误差 0.232300 LSB，端点表容量 1040 bit；
+- 因误差更小且存储开销显著更低，第一版选择 PWL64，并用一个可流水复用的小乘法器完成插值。
+
+DDR3 与 UART 闭环：
+
+```text
+UART 上传 A[896]、B[896] 和 65 个 PWL 端点
+→ DDR3 固定地址保存
+→ AXI burst 读取并装入片上缓存
+→ 选择残差/缩放/元素乘法/SiLU 四种操作
+→ 16 个 int16 结果打包为一个 256 bit 拍
+→ 56 拍结果写回 DDR3
+→ UART 返回 896 个 int16
+→ Python 逐元素比较
+```
+
+验证结果：
+
+- E2 单元测试：11/11 PASS；
+- 完整 `model_tools` 回归：34/34 PASS；
+- 软件和上传载荷随机压力：1000/1000 PASS，seed=`20260727`；
+- 固定边界向量覆盖 RNE tie、正负溢出、饱和、SiLU 尾部和最高 `segment=63`；
+- 固定四操作真实上板：每种 896 个 signed Q6.10 输出与 Python 逐位一致，端到端约 1.01 秒；
+- 固定输出 SHA256：residual=`dd6cf26e917004e52973ee8506bfdc2e403dac2d31e64abba9c6cd4619196dca`，scale=`8137acd3e9c983380ef1d024858e88ed54b675791cf416539ca3b03fa9c3455c`，multiply=`f07847b17449eb401324b413b4df7765d14377e9b20c340f48e6dc87112f25aa`，SiLU=`1933e7c436030c00285bffb2def77c70c979b32c041af3833f61fa25825fdbf8`；
+- 真实随机上板：分三批累计 300/300 PASS，seed=`20260727..20261026`，总耗时约 312.49 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功；
+- 最终未布线网络：0；
+- 资源：7872 LUT、7778 FF、70 个 distributed RAM LUT、8 DRM、2 APM；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.580 ns`、TNS=0，WHS=`+0.112 ns`、THS=0；快角 WNS=`+2.951 ns`、TNS=0，WHS=`+0.051 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`elementwise_k896\pnr_seed17\generate_bitstream\elementwise_k896_top.sbit`；
+- 位流 SHA256：`809b436f1c369d66a20c5f2faaa8e684a15a3963d659b95d080e342c3a7d9d50`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K ELEMENTWISE K896 V1`，DDR3 初始化成功。
+
+开发中修复了两类问题：首版 SiLU 小乘法、64 位 RNE 和端点加法形成长组合路径；拆成窄位寄存流水后时序通过。首次固定上板仅最高 PWL 段 3 个元素错误，根因是 6 位 `63+1` 索引回绕到 0；改用 7 位端点索引后固定和随机测试全部通过。
+
+## 十四、当前项目状态
+
+当前已经完成八级真实闭环：
 
 ```text
 长度16单点积
@@ -583,22 +649,25 @@ UART 上传 4608 B
 → 真实 q_proj M4K896 分组 UQ4.28 signed INT64 Q28 小闭环
 → 真实 layer0 q_proj M896K896 完整 Linear 层闭环
 → 真实 layer0 input_layernorm K896 定点 RMSNorm 闭环
+→ K896 残差、缩放、元素乘法和 PWL64 SiLU 闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、RMSNorm 平方和/均值/LUT rsqrt、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、RMSNorm 平方和/均值/LUT rsqrt、元素级 RNE/饱和/PWL 非线性、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；首个完整真实 Linear 层和首个基础非矩阵算子已经完成，尚未实现元素级运算、Attention、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Linear、RMSNorm 和元素级基础算子已经完成，尚未实现 Embedding、Attention、MLP、Transformer Block 和文本生成。
 
-## 十四、下一阶段路线
+## 十五、下一阶段路线
 
-### 当前唯一下一步：E2 元素级运算
+### 当前唯一下一步：E3 Embedding/查表
 
-1. 为统一 signed Q6.10 激活建立残差加法、定点乘法/缩放和元素级乘法的 Python 硬件等价参考。
-2. 明确 RNE、饱和、溢出和边界向量。
-3. 比较 SiLU / `x·sigmoid(x)` 的 LUT 与分段线性近似误差、资源和流水延迟。
-4. 新建独立 K=896 元素级算子工程，不覆盖任何已有验证工程和位流。
-5. 完成 DDR3 双向量读取、残差/乘法/SiLU 计算、结果回写和 Python 逐元素比较。
-6. 完成固定向量、随机压力、PDS 全流程、多角时序和真实上板验证。
+1. 确认真实 `model.embed_tokens.weight` 的形状、INT4 分组格式、行布局和 Token ID 边界。
+2. 建立 Token ID 到 embedding 行地址及 14 个 group scale 地址的 Python 硬件等价参考。
+3. 明确 packed INT4 + FP16 scale 转换为统一 signed Q6.10 激活时的 RNE、饱和和误差规则。
+4. 新建独立 K=896 Embedding 工程，不覆盖任何已有验证工程和位流。
+5. 完成 DDR3 按 Token ID 读取一行权重、分组反量化/格式转换、结果写回和 Python 逐元素比较。
+6. 完成边界 Token ID、随机 Token ID、PDS 全流程、多角时序和真实上板验证。
+
+真实元数据已确认：`model.embed_tokens.weight` 的 shape 为 `[151936, 896]`，storage 为 `int4_groupwise_symmetric`，全局 group size 为 64。
 
 ### 后续算子
 

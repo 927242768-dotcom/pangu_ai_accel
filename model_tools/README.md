@@ -104,9 +104,12 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
 | `rmsnorm_fixed_reference.py` | layer0 input_layernorm 的 Q6.10、Q12.20、LUT/NR rsqrt 与硬件等价金标准 |
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
+| `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
+| `elementwise_k896_reference.json` | E2 固定边界向量、SiLU 全输入域误差和关键数组 SHA256 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
 | `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
+| `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 
 ## 6. 常用命令
 
@@ -197,6 +200,22 @@ python tools\pangu_rmsnorm_k896_host.py selftest ^
 ```
 
 RMSNorm 第一版使用 signed Q6.10 输入、gamma 和输出，40 位平方和、Q12.20 均值/epsilon、UQ12.20 rsqrt，并统一采用 RNE 和显式饱和。完整硬件协议、DDR3 地址和上板证据见 `rmsnorm_k896/README.md`。
+
+生成 E2 K=896 元素级固定向量并比较 SiLU 方案：
+
+```bat
+python model_tools\elementwise_fixed_reference.py ^
+  --manifest model_tools\elementwise_k896_reference.json
+```
+
+运行元素级载荷和 1000 组软件压力自检：
+
+```bat
+python tools\pangu_elementwise_k896_host.py selftest ^
+  --rounds 1000 --seed 20260727
+```
+
+E2 统一使用 signed Q6.10 输入、标量和输出。残差加法显式饱和；缩放和元素乘法在 signed Q12.20 中计算，经 RNE 右移 10 位后饱和。SiLU 第一版选择覆盖 `[-8,8)` 的 64 段端点分段线性方案，区间外采用 `x<-8 -> 0`、`x>=8 -> x`。完整协议和地址布局见 `elementwise_k896/README.md`。
 
 ## 7. 真实 Linear 量化与定点定义
 
@@ -302,3 +321,17 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 相关单元测试与既有回归合计 23/23 PASS；
 - RMSNorm 软件随机压力：1000/1000 PASS，seed=`20260726`；
 - 固定清单：`rmsnorm_layer0_reference.json`。
+
+2026-07-24 建立 E2 K=896 元素级定点软件参考：
+
+- 输入 A/B、标量 scale 和输出统一为 signed Q6.10 int16；
+- 残差使用扩展加法和显式 signed int16 饱和；
+- 定点缩放和元素乘法使用 signed Q12.20 乘积、RNE 右移 10 位和显式饱和；
+- 在完整 65536 个 int16 输入上比较 2048 项中点 LUT 和 64 段端点 PWL；
+- LUT2048 最大误差 5 Q10 LSB、平均误差 0.352692 LSB、表容量 32768 bit；
+- PWL64 最大误差 4 Q10 LSB、平均误差 0.232300 LSB、端点表容量 1040 bit；
+- 第一版选择 PWL64，覆盖 `[-8,8)`，尾部采用 0/x 规则；
+- E2 相关单元测试 11/11 PASS；
+- 完整 `model_tools` 回归 34/34 PASS；
+- 软件和上传载荷随机压力 1000/1000 PASS，seed=`20260727`;
+- 固定清单：`elementwise_k896_reference.json`。

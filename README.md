@@ -14,10 +14,11 @@
 8. [`gemv_int4_group_q28/README.md`](gemv_int4_group_q28/README.md)：已验证的真实 q_proj M=4、K=896 分组 UQ4.28 定点小闭环。
 9. [`gemv_int4_qproj_full/README.md`](gemv_int4_qproj_full/README.md)：已验证的 layer0 q_proj 完整 M=896、K=896 真实 Linear 层闭环。
 10. [`rmsnorm_k896/README.md`](rmsnorm_k896/README.md)：已验证的 layer0 input_layernorm K=896 定点 RMSNorm 闭环。
+11. [`elementwise_k896/README.md`](elementwise_k896/README.md)：已验证的 K=896 残差、缩放、元素乘法和 PWL64 SiLU 闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到首个基础非矩阵算子 RMSNorm 的多级计算闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm 和元素级非线性算子的多级计算闭环：
 
 ```text
 长度16单点积：
@@ -45,13 +46,16 @@ D2 完整真实 Linear 层现已完成。独立工程 `gemv_int4_qproj_full` 将
 
 E1 RMSNorm 也已完成。独立工程 `rmsnorm_k896` 对真实 `model.layers.0.input_layernorm.weight` 执行 K=896 定点 RMSNorm：输入、gamma 和输出使用 signed Q6.10，40 位平方和、Q12.20 均值/epsilon、UQ12.20 LUT256 rsqrt，全部采用 RNE 和显式饱和。固定向量 896 个输出与 Python LUT 金标准逐位一致，输出 SHA256=`1f52890780e0f4cc0f734d47a4e3bdb28c3c964b8734b442d7781d4ca155a4f0`；软件随机 `1000/1000 PASS`，真实上板随机 `300/300 PASS`。PDS 全流程和多角时序通过，慢角 100 MHz WNS=`+0.374 ns`、TNS=0；位流 SHA256=`94c82d1ef6adf563043c6f90f5744ec258156d85c6db134389132ae4f2938b11`。
 
+E2 元素级运算现已完成。独立工程 `elementwise_k896` 支持 signed Q6.10 残差加法、定点缩放、元素乘法和 64 段端点 PWL SiLU，统一使用 RNE 与显式饱和。PWL64 在完整 int16 输入域最大误差为 4 Q10 LSB，端点表仅 1040 bit。四种操作的固定 K=896 向量均与 Python 逐位一致；软件随机 `1000/1000 PASS`，真实上板随机累计 `300/300 PASS`。PDS 全流程、多角建立/保持/恢复/移除均通过，慢角 100 MHz WNS=`+0.580 ns`、TNS=0；位流 SHA256=`809b436f1c369d66a20c5f2faaa8e684a15a3963d659b95d080e342c3a7d9d50`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 E2 元素级运算：先为统一 signed Q6.10 激活建立残差加法、定点乘法/缩放和
-元素级乘法的 Python 硬件等价参考，固定 RNE、饱和和边界规则；再比较 SiLU / x·sigmoid(x)
-的 LUT 与分段线性近似，选定第一版实现。随后新建独立 K=896 元素级算子工程，完成
-DDR3 读取、计算、结果回写、逐元素比较、随机压力、PDS、多角时序和真实上板验证。
+进入 E3 Embedding/查表：真实元数据已确认 `model.embed_tokens.weight` 的 shape 为
+`[151936, 896]`、storage 为 `int4_groupwise_symmetric`、group size 为 64。先建立
+Token ID 到 embedding 行及 14 个 scale 的地址参考，确定 packed INT4 + FP16 scale
+转换为 signed Q6.10 激活的 RNE、饱和和误差规则；再新建独立 K=896 Embedding 工程，
+完成 DDR3 行读取、格式转换、结果回写、边界/随机 Token ID、PDS、多角时序和真实上板验证。
 不得覆盖任何已有验证工程和位流。
 ```
 

@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施和 D2 真实 Linear 已完成。`gemv_int4_qproj_full` 已真实上板完成 layer0 q_proj 完整 M=896、K=896 计算，896 个 signed int64 Q28 与 Python 金标准逐位一致；软件随机激活 1000/1000 PASS，真实上板随机激活 3/3 PASS，多角时序 TNS=0。下一步进入 E1 RMSNorm：先为 layer0 input_layernorm 建立 K=896 定点软件参考，确定平方和、均值、epsilon、gamma、舍入/饱和和 rsqrt 近似方案，再在新的独立工程中完成小闭环，不覆盖任何已有验证工程和位流
+- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm 和 E2 元素级运算均已完成。`elementwise_k896` 已真实上板完成 K=896 signed Q6.10 残差、缩放、元素乘法和 PWL64 SiLU 四种操作，固定向量逐位一致，软件随机 1000/1000 PASS，真实上板随机 300/300 PASS，多角时序 TNS=0。下一步进入 E3 Embedding/查表：围绕真实 `model.embed_tokens.weight`（shape `[151936,896]`、INT4 group size 64）建立 Token ID 行地址、分组 scale、Q6.10 格式转换的软件参考和独立硬件闭环，不覆盖任何已有验证工程和位流

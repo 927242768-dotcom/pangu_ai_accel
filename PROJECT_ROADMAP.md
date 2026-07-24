@@ -369,12 +369,33 @@ E1 验证证据（2026-07-24）：
 
 ### E2 元素级运算
 
-- [ ] 残差加法
-- [ ] 定点乘法和缩放
-- [ ] 饱和与舍入
-- [ ] SiLU 或 `x·sigmoid(x)` 近似
-- [ ] element-wise multiply
-- [ ] Python 参考与误差阈值
+- [x] 残差加法
+- [x] 定点乘法和缩放
+- [x] 饱和与舍入
+- [x] SiLU 或 `x·sigmoid(x)` 近似
+- [x] element-wise multiply
+- [x] Python 参考与误差阈值
+
+E2 验证证据（2026-07-24）：
+
+- 独立工程：`elementwise_k896`，未覆盖任何已验证 GEMV、Linear 或 RMSNorm 工程和位流；
+- 统一格式：输入 A/B、标量 scale 和输出均为 signed Q6.10 int16；
+- 残差加法使用扩展加法和显式 signed int16 饱和；缩放与元素乘法使用 signed Q12.20 乘积、RNE 右移 10 位和显式饱和；
+- SiLU 在完整 65536 个 int16 输入上比较 LUT2048 与 64 段端点 PWL：LUT 最大误差 5 Q10 LSB、表容量 32768 bit；PWL 最大误差 4 Q10 LSB、端点表 1040 bit，第一版选择 PWL64；
+- SiLU 覆盖 `[-8,8)`，尾部规则为 `x<-8 -> 0`、`x>=8 -> x`；
+- E2 单元测试 11/11 PASS，完整 `model_tools` 回归 34/34 PASS；
+- 软件与上传载荷随机压力：1000/1000 PASS，seed=`20260727`；
+- 固定边界向量：残差、缩放、元素乘法和 SiLU 四种操作，每种 896 个输出均与 Python 逐位一致，端到端约 1.01 秒；
+- 固定输出 SHA256：residual=`dd6cf26e917004e52973ee8506bfdc2e403dac2d31e64abba9c6cd4619196dca`，scale=`8137acd3e9c983380ef1d024858e88ed54b675791cf416539ca3b03fa9c3455c`，multiply=`f07847b17449eb401324b413b4df7765d14377e9b20c340f48e6dc87112f25aa`，SiLU=`1933e7c436030c00285bffb2def77c70c979b32c041af3833f61fa25825fdbf8`；
+- 真实随机上板：分三批累计 300/300 PASS，seed=`20260727..20261026`，合计约 312.49 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功，最终未布线网络 0；
+- 资源：LUT=`7872`、FF=`7778`、distributed RAM=`70`、DRM=`8`、APM=`2`；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.580 ns`、TNS=0，WHS=`+0.112 ns`、THS=0；快角 WNS=`+2.951 ns`、TNS=0，WHS=`+0.051 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`elementwise_k896/pnr_seed17/generate_bitstream/elementwise_k896_top.sbit`；
+- SHA256：`809b436f1c369d66a20c5f2faaa8e684a15a3963d659b95d080e342c3a7d9d50`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件为 `PANGU50K ELEMENTWISE K896 V1`，DDR3 初始化成功；
+- 开发中修复了 SiLU 长组合路径建立违例，以及最高段 `63+1` 的 6 位索引回绕问题。
 
 ### E3 Embedding/查表
 
@@ -574,6 +595,14 @@ E1 验证证据（2026-07-24）：
 | `rmsnorm_k896/pnr/build_rmsnorm_k896.tcl` | E1 RMSNorm 独立 PDS 构建脚本 |
 | `rmsnorm_k896/README.md` | E1 定点格式、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_rmsnorm_k896_host.py` | RMSNorm 固定载荷、软件自检、固定与随机上板比较工具 |
+| `model_tools/elementwise_fixed_reference.py` | E2 signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 金标准 |
+| `model_tools/elementwise_k896_reference.json` | E2 固定边界向量、SiLU 完整输入域误差和关键数组 SHA256 |
+| `model_tools/test_elementwise_fixed_reference.py` | E2 RNE、饱和、最高 PWL 段覆盖和 1000 轮软件压力测试 |
+| `elementwise_k896/rtl/elementwise_k896_core.v` | 已验证 K=896 四模式元素级计算、PWL64 SiLU 和结果打包核心 |
+| `elementwise_k896/rtl/elementwise_k896_ctrl.v` | 已验证元素级 UART、DDR3 双向量/PWL 载荷、结果回写与回读调度 |
+| `elementwise_k896/pnr/build_elementwise_k896.tcl` | 固定 seed17/29 和保持修复参数的 E2 PDS 构建脚本 |
+| `elementwise_k896/README.md` | E2 定点规则、SiLU 选择、协议、地址、时序、位流和上板证据 |
+| `tools/pangu_elementwise_k896_host.py` | E2 固定载荷、软件自检、四操作固定与随机上板比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -591,10 +620,10 @@ E1 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 E2 元素级运算：先为统一 signed Q6.10 激活建立残差加法、定点乘法/缩放和
-元素级乘法的 Python 硬件等价参考，固定 RNE、饱和和边界向量；再比较 SiLU / x·sigmoid(x)
-的 LUT 与分段线性近似误差、资源和流水延迟，选定第一版实现。
-随后新建独立 K=896 元素级算子工程，完成 DDR3 读取两个向量、残差/乘法/SiLU 计算、
-结果写回、Python 逐元素比较、固定向量、随机压力、PDS、多角时序和真实上板验证。
-不得覆盖任何已有验证工程和位流。
+进入 E3 Embedding/查表：先确认真实 tied embedding 张量的名称、形状、INT4 分组格式、
+Token ID 边界和行地址计算，建立 Token ID → embedding 行的 Python 硬件等价参考，并确定
+INT4 权重、FP16 scale 到统一 signed Q6.10 激活的 RNE、饱和和误差规则。
+随后新建独立 embedding K=896 工程，从 DDR3 按 Token ID 读取一行 packed INT4 权重与
+14 个分组 scale，完成反量化/格式转换、结果写回、Python 逐元素比较、边界 Token ID、
+随机 Token ID、PDS、多角时序和真实上板验证。不得覆盖任何已有验证工程和位流。
 ```
