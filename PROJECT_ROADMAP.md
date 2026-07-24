@@ -497,10 +497,29 @@ F3 验证证据（2026-07-24）：
 
 ### F4 Attention Score
 
-- [ ] Q·K 点积
-- [ ] 缩放 `1/sqrt(head_dim)`
-- [ ] causal mask
-- [ ] 支持多头循环调度
+- [x] Q·K 点积
+- [x] 缩放 `1/sqrt(head_dim)`
+- [x] causal mask
+- [x] 支持多头循环调度
+
+F4 验证证据（2026-07-24）：
+
+- 新增独立 `attention_score_f4` 工程，未覆盖 F3 或更早阶段的工程与位流；
+- Q=`[14,64]`、K=`[2,64]` 均为 head-major signed int64 Q28；每 7 个连续 Q head 共用一个 KV head，映射为 Q head `0..6 -> KV0`、`7..13 -> KV1`；
+- 64 维点积使用精确 signed Q56 累加；`head_dim=64` 对应 `1/sqrt(64)=1/8`，统一执行 signed RNE 右移 31 位并显式饱和到 signed int64 Q28；
+- 固定 score 输出布局为 `[14,16]` head-major，共 1792 B；未来位置和未使用槽统一写入 `INT64_MIN=0x8000000000000000`；
+- K 地址完全复用 F3：`0x02000000 + layer*0x00800000 + position*0x200`，F4 只读取 K，不改写 V；
+- Q/K 片上缓存按 256 bit beat 同步读，成功推断 8 个 DRM18K；64×64 有符号乘法由 16 个 16×16 部分积顺序精确重构；
+- 固定真实窗口覆盖 layer0/query0、layer0/query1、layer13/query2026 的部分未来 mask，以及 layer27/query16383 的最后 16 token 边界，四组完整 score 均真实上板逐位一致；
+- 固定 score SHA256 分别为 `0697d1457bbd91a13a86e06b7de87a9928258c51c2b2b23d31a054bbc99325c5`、`30deb88a395f65ebaa92810278a8954f4cb0c8999462eb7071449dbf957a515d`、`c91ad94ac9af6da06aa2143cd81c87c8d3aeb68cd93ee5e50ecc54271bd51096`、`466cea477112b15a43ee5d03529bc34c10880f93887e44ae078bfac3ef527948`；
+- F4 新增单元测试 9/9 PASS，完整 `model_tools` 回归 73/73 PASS；软件随机窗口、GQA、RNE、mask 和载荷压力 1000/1000 PASS，seed=`20260802`；
+- 真实 FPGA 随机层、随机 query/start、`1..16` token 窗口、随机 Q/K 回归 100/100 PASS，seed=`20260802`，约 170.16 秒；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，最终未布线网络为 0；
+- 资源：9594 LUT、11621 FF、70 个 distributed RAM、8 DRM、1 APM；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.482 ns`、TNS=0，hold WHS=`+0.170 ns`、THS=0；快角 setup WNS=`+3.003 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`attention_score_f4/pnr/generate_bitstream/attention_score_top.sbit`，大小 2101696 B，SHA256=`669cb5b23cb6c5d33d0003f32452e57cda251751179c318c1b5d8f2ed8c0e0f8`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K ATTN SCORE V1`，DDR3 初始化成功；
+- 本阶段未实现 Softmax，严格停在 F4 score 输出。
 
 ### F5 Softmax
 
@@ -700,6 +719,14 @@ F3 验证证据（2026-07-24）：
 | `kv_cache_f3/pnr/build_kv_cache.tcl` | F3 独立 PDS 全流程构建脚本 |
 | `kv_cache_f3/README.md` | F3 容量决策、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_kv_cache_host.py` | F3 软件自检、真实固定、层间隔离和随机层/位置上板工具 |
+| `model_tools/attention_score_reference.py` | F4 Q·K、1/8 缩放、14Q/2KV GQA、causal mask 和固定 score 金标准 |
+| `model_tools/attention_score_f4_reference.json` | F4 四组真实固定窗口、K 地址、mask 和完整 score SHA256 清单 |
+| `model_tools/test_attention_score_reference.py` | F4 GQA、RNE、缩放、mask、载荷和真实固定窗口测试 |
+| `attention_score_f4/rtl/attention_score_core.v` | F4 DRM Q/K 缓存、精确 64×64 部分积重构、Q56 累加、RNE 和多头核心 |
+| `attention_score_f4/rtl/attention_score_ctrl.v` | F4 UART、DDR3 Q/K 读取、14Q/2KV 调度、mask 和 score 部分写回控制器 |
+| `attention_score_f4/pnr/build_attention_score.tcl` | F4 独立 PDS 全流程构建脚本 |
+| `attention_score_f4/README.md` | F4 定点规则、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_attention_score_host.py` | F4 软件自检、真实固定窗口和随机层/窗口/Q/K 上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -717,9 +744,10 @@ F3 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 F4 Attention Score：基于 F1 已验证的 Q、F2 RoPE 输出和 F3 历史 K Cache，
-先建立 Q·K 点积、1/sqrt(head_dim)=1/8 定点缩放、causal mask 和 GQA head 映射的软件金标准。
-随后新建独立 Attention Score 工程，实现 14 个 Q heads 对 2 个 KV heads 的循环调度、历史 token
-顺序读取和 score 输出，并执行固定/随机序列、边界、PDS、多角时序和真实上板测试。
-本阶段不得提前进入 Softmax，不得覆盖 F3 及更早阶段的验证工程和位流。
+进入 F5 Softmax：直接消费 F4 已验证的 `[14,16]` signed Q28 Attention Score，
+先建立 causal mask 感知的 max reduction、减最大值、exp 近似/查表、sum reduction、reciprocal
+和归一化的软件金标准，明确概率定点格式、RNE/饱和规则以及全 mask/单有效/长窗口边界行为。
+随后新建独立 Softmax 工程，完成 14 heads 循环调度、固定/随机窗口、数值稳定性、PDS、
+多角时序和真实上板逐位验证。本阶段不得提前进入 V 加权和或 F6 Attention 输出，
+不得覆盖 F4 及更早阶段的验证工程和位流。
 ```

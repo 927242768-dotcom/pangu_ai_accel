@@ -104,6 +104,12 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
 | `qkv_linear_reference.py` | F1 layer0 Q/K/V 统一 P50 加载、Q28 重算、动态载荷和 GQA head-major 布局参考 |
 | `qkv_layer0_reference.json` | F1 Q/K/V 固定输出、上传布局、head shape 和关键数组 SHA256 清单 |
+| `rope_fixed_reference.py` | F2 Qwen2 split-half RoPE、Q28/Q1.30、RNE 和位置表软件金标准 |
+| `rope_layer0_reference.json` | F2 固定位置 Q/K 输出与 SHA256 清单 |
+| `kv_cache_reference.py` | F3 28 层、16384 token K/V Cache 地址、容量、边界和载荷参考 |
+| `kv_cache_reference.json` | F3 固定层/位置 K/V 地址和 SHA256 清单 |
+| `attention_score_reference.py` | F4 Q·K、1/8 缩放、14Q/2KV GQA、causal mask 和固定 `[14,16]` score 金标准 |
+| `attention_score_f4_reference.json` | F4 固定真实窗口、mask、K 地址和完整 score SHA256 清单 |
 | `rmsnorm_fixed_reference.py` | layer0 input_layernorm 的 Q6.10、Q12.20、LUT/NR rsqrt 与硬件等价金标准 |
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
@@ -113,6 +119,9 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
 | `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
 | `test_qkv_linear_reference.py` | F1 Q/K/V 形状、共享 hidden state、GQA 布局、载荷和真实 P50 固定清单测试 |
+| `test_rope_fixed_reference.py` | F2 split-half 配对、RNE、固定位置和随机 Q/K 测试 |
+| `test_kv_cache_reference.py` | F3 地址容量、边界、载荷和随机层/位置测试 |
+| `test_attention_score_reference.py` | F4 GQA、RNE、1/8 缩放、causal mask、载荷和真实固定窗口测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
@@ -417,3 +426,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - F3 新增单元测试 9/9 PASS；完整 `model_tools` 回归 64/64 PASS；
 - 软件地址、连续性、越界、载荷往返随机压力 1000/1000 PASS，seed=`20260801`；
 - 固定清单：`kv_cache_reference.json`。
+
+
+2026-07-24 建立 F4 Attention Score 定点软件参考：
+
+- Q=`[14,64]`、K=`[2,64]` 均为 head-major signed int64 Q28；
+- GQA 映射为 Q head `0..6 -> KV0`、`7..13 -> KV1`；
+- 64 维点积精确累加为 signed Q56，`1/sqrt(64)=1/8` 与恢复 Q28 合并为 signed RNE 右移 31 位，并显式饱和到 int64；
+- 固定输出为 `[14,16]` head-major signed int64 Q28，未来位置和未使用槽统一为 `INT64_MIN`；
+- K 地址复用 F3：`0x02000000 + layer*0x00800000 + position*0x200`；
+- 固定窗口覆盖 query 0、query 1、部分未来 causal mask 和 position 16383 最后 16 token 边界；
+- F4 新增单元测试 9/9 PASS；完整 `model_tools` 回归 73/73 PASS；
+- 软件随机窗口、GQA、RNE、mask 和载荷压力 1000/1000 PASS，seed=`20260802`；
+- 固定清单：`attention_score_f4_reference.json`。
