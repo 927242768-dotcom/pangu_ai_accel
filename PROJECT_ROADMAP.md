@@ -399,10 +399,28 @@ E2 验证证据（2026-07-24）：
 
 ### E3 Embedding/查表
 
-- [ ] Token ID 到 embedding 行地址映射
-- [ ] DDR3 中读取一个 token 的 embedding
-- [ ] 转换为统一激活格式
-- [ ] 与软件参考比较
+- [x] Token ID 到 embedding 行地址映射
+- [x] DDR3 中读取一个 token 的 embedding
+- [x] 转换为统一激活格式
+- [x] 与软件参考比较
+
+E3 验证证据（2026-07-24）：
+
+- 独立工程：`embedding_k896`，未覆盖任何已验证 GEMV、Linear、RMSNorm 或元素级工程和位流；
+- 真实 tied embedding：`model.embed_tokens.weight`，shape=`[151936,896]`、group size=64、每行 14 groups，Token ID 有效范围 `0..151935`；
+- DDR3 行槽：每个 Token 固定 512 B/16 拍，控制器地址 `token_id << 7`；前 448 B 为 packed signed INT4，后 56 B 为 14 个 UQ4.28 scale，末尾 8 B padding；
+- 真实全部 FP16 embedding scales 均可被 UQ4.28 精确表示；硬件执行 signed INT4 × unsigned UQ4.28，RNE 右移 18 位后显式饱和为 signed Q6.10 int16；
+- E3 单元测试 11/11 PASS，完整 `model_tools` 回归 45/45 PASS；
+- 真实 P50 软件/载荷随机压力：1000/1000 PASS，seed=`20260728`，最大 Q6.10 量化误差 `0.00048828125`；
+- 固定 Token ID `[0,1,2026,151935]` 的 896 个输出真实上板逐位一致，覆盖最低、相邻、普通和最大 Token ID；
+- 真实随机 Token ID 上板压力：300/300 PASS，seed=`20260728`，约 75.53 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功，最终未布线网络 0；
+- 资源：LUT=`7637`、FF=`7380`、distributed RAM=`326`、APM=`2`、DRM=`0`；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.679 ns`、TNS=0，WHS=`+0.172 ns`、THS=0；快角 WNS=`+2.964 ns`、TNS=0，WHS=`+0.101 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`embedding_k896/pnr/generate_bitstream/embedding_k896_top.sbit`；
+- SHA256：`cd0e138e494875035cf5c66d76eaf250729625c172bf51c935b831d31c45c0fa`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件为 `PANGU50K EMBEDDING K896 V1`，DDR3 初始化成功。
 
 ## 阶段 F：Attention 数据通路
 
@@ -603,6 +621,14 @@ E2 验证证据（2026-07-24）：
 | `elementwise_k896/pnr/build_elementwise_k896.tcl` | 固定 seed17/29 和保持修复参数的 E2 PDS 构建脚本 |
 | `elementwise_k896/README.md` | E2 定点规则、SiLU 选择、协议、地址、时序、位流和上板证据 |
 | `tools/pangu_elementwise_k896_host.py` | E2 固定载荷、软件自检、四操作固定与随机上板比较工具 |
+| `model_tools/embedding_fixed_reference.py` | E3 Token 行地址、真实 INT4/FP16 scale 到 UQ4.28/Q6.10 的硬件等价参考 |
+| `model_tools/embedding_k896_reference.json` | E3 四个固定 Token 的载荷、输出和地址 SHA256 清单 |
+| `model_tools/test_embedding_fixed_reference.py` | E3 地址边界、RNE、饱和、真实 scale 和 1000 个随机 Token 测试 |
+| `embedding_k896/rtl/embedding_k896_core.v` | 已验证 14 组 INT4×UQ4.28、RNE、饱和与 896 元素结果打包核心 |
+| `embedding_k896/rtl/embedding_k896_ctrl.v` | 已验证 Token 地址映射、UART、DDR3 行读取、结果回写与回读调度 |
+| `embedding_k896/pnr/build_embedding_k896.tcl` | E3 独立 PDS 全流程构建脚本 |
+| `embedding_k896/README.md` | E3 格式、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_embedding_k896_host.py` | E3 软件自检、固定边界 Token 和随机 Token 上板比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -620,10 +646,10 @@ E2 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 E3 Embedding/查表：先确认真实 tied embedding 张量的名称、形状、INT4 分组格式、
-Token ID 边界和行地址计算，建立 Token ID → embedding 行的 Python 硬件等价参考，并确定
-INT4 权重、FP16 scale 到统一 signed Q6.10 激活的 RNE、饱和和误差规则。
-随后新建独立 embedding K=896 工程，从 DDR3 按 Token ID 读取一行 packed INT4 权重与
-14 个分组 scale，完成反量化/格式转换、结果写回、Python 逐元素比较、边界 Token ID、
-随机 Token ID、PDS、多角时序和真实上板验证。不得覆盖任何已有验证工程和位流。
+进入 F1 Q/K/V 线性层：围绕 layer0 真实张量建立统一软件参考和独立硬件闭环。
+已确认 q_proj=[896,896]、k_proj=[128,896]、v_proj=[128,896]，均为 group size 64 的
+INT4 分组对称量化；模型为 14 个 Q heads、2 个 KV heads、head_dim=64 的 GQA 布局。
+先复用已验证 q_proj 完整层数据通路，补齐 K/V 的真实权重、scale、bias、Q28 金标准和
+输出 head 布局；再建立可按投影类型运行的独立 QKV 工程，验证 Q/K/V 全输出、GQA 张量
+排列、固定与随机真实 hidden state、PDS、多角时序和真实上板。不得覆盖任何已有验证工程和位流。
 ```

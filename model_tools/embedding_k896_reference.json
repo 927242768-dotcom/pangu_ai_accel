@@ -1,0 +1,127 @@
+{
+  "format_version": 1,
+  "operator": "qwen2_tied_embedding_k896",
+  "tensor_name": "model.embed_tokens.weight",
+  "shape": [151936, 896],
+  "storage": "int4_groupwise_symmetric",
+  "group_size": 64,
+  "groups_per_row": 14,
+  "tied_embedding": true,
+  "fixed_formats": {
+    "weight": "packed signed INT4 low_nibble_first",
+    "scale": "UQ4.28 uint32 converted exactly from FP16",
+    "output": "signed Q6.10 int16",
+    "rounding": "round_to_nearest_even shift 18",
+    "saturation": "explicit signed int16 saturation"
+  },
+  "ddr_row_slot": {
+    "bytes": 512,
+    "beats_256bit": 16,
+    "controller_address_stride": 128,
+    "packed_weight_bytes": 448,
+    "scale_q28_bytes": 56,
+    "padding_bytes": 8,
+    "result_controller_address": 33554432,
+    "maximum_slot_controller_address": 19447680,
+    "maximum_slot_byte_offset": 77790720
+  },
+  "fixed_token_ids": [0, 1, 2026, 151935],
+  "rows": [
+    {
+      "token_id": 0,
+      "slot_ctrl_addr": 0,
+      "slot_byte_offset": 0,
+      "scale_fp16_min": 0.004360198974609375,
+      "scale_fp16_max": 0.008056640625,
+      "output_q10_min": -58,
+      "output_q10_max": 50,
+      "output_saturated_count": 0,
+      "max_abs_q10_quantization_error": 0.00048828125,
+      "mean_abs_q10_quantization_error": 0.00022227423531668528,
+      "preview": {
+        "quantized_int4_first16": [-1, 5, 1, 0, -3, 0, 0, -2, 4, -1, -1, -2, 2, 0, -4, 0],
+        "scales_q28": [2162688, 1498112, 1797120, 1507328, 1563648, 1619968, 1600512, 1676288, 1685504, 1619968, 1778688, 1170432, 1263616, 1235968],
+        "output_q10_first16": [-8, 41, 8, 0, -25, 0, 0, -16, 33, -8, -8, -16, 16, 0, -33, 0]
+      },
+      "sha256": {
+        "quantized_int4": "41e442f45a7dab759446faf1a67b9d3cb96f118fb2660698c867b95c2b9e5519",
+        "scales_fp16": "47bbe6ad9429b0ac5b7d05fc72b3370392ac46af4e14434671cd122efa361a23",
+        "scales_q28": "d29fa036f074a832e12dbebe12b832d89d6d76f8c01d37849c6d6dbd74691d2b",
+        "output_q10": "fd5e2ad5a2f7861324e911c48e0a7503d732c39a000fd96a500cf92410006a74",
+        "payload_512b": "63e57a2c7a99f0ca5a995933c1905204d564cc2aac43b11dcc38a48c86a1c81d"
+      }
+    },
+    {
+      "token_id": 1,
+      "slot_ctrl_addr": 128,
+      "slot_byte_offset": 512,
+      "scale_fp16_min": 0.004413604736328125,
+      "scale_fp16_max": 0.00798797607421875,
+      "output_q10_min": -57,
+      "output_q10_max": 57,
+      "output_saturated_count": 0,
+      "max_abs_q10_quantization_error": 0.00048828125,
+      "mean_abs_q10_quantization_error": 0.00021693961960928782,
+      "preview": {
+        "quantized_int4_first16": [-3, 0, -3, -1, 1, 0, 1, -2, 3, -1, 6, 5, 3, 0, 0, 0],
+        "scales_q28": [1403904, 1638400, 2125824, 1534976, 2144256, 1319936, 2003968, 1797120, 1882112, 1184768, 1778688, 1498112, 1600512, 1469440],
+        "output_q10_first16": [-16, 0, -16, -5, 5, 0, 5, -11, 16, -5, 32, 27, 16, 0, 0, 0]
+      },
+      "sha256": {
+        "quantized_int4": "232c6e7b2e27d352f0b89631baa1c9d43b27cce4e41deb2c8071426930101ff0",
+        "scales_fp16": "683fb88e9103a3d1b6a37417210026a656a4ff6bb7fb933deb6c3e61d7f078f6",
+        "scales_q28": "4b9ef2825cc32655cc0d5571e65e0fef0392dcd05105e4b63ac340814ab4c22f",
+        "output_q10": "26d13ee91a84f894232f60a63d0deda878628d2dc3e2a0de409c5038630e6a1b",
+        "payload_512b": "6b615079d20d44af9c1bec644166fc242a916a1e7943fe5450303cd250a2c7b6"
+      }
+    },
+    {
+      "token_id": 2026,
+      "slot_ctrl_addr": 259328,
+      "slot_byte_offset": 1037312,
+      "scale_fp16_min": 0.004169464111328125,
+      "scale_fp16_max": 0.00603485107421875,
+      "output_q10_min": -43,
+      "output_q10_max": 41,
+      "output_saturated_count": 0,
+      "max_abs_q10_quantization_error": 0.00048828125,
+      "mean_abs_q10_quantization_error": 0.0001989603042602539,
+      "preview": {
+        "quantized_int4_first16": [-1, 0, -6, 1, -4, 6, 3, -2, -2, -3, 1, -2, 5, 7, -2, -5],
+        "scales_q28": [1319936, 1338368, 1146880, 1174528, 1338368, 1545216, 1376256, 1357824, 1217536, 1619968, 1254400, 1310720, 1119232, 1376256],
+        "output_q10_first16": [-5, 0, -30, 5, -20, 30, 15, -10, -10, -15, 5, -10, 25, 35, -10, -25]
+      },
+      "sha256": {
+        "quantized_int4": "130f74ed9566ad85e9f74ef76ed97987831d50e83750828cab955928ea6eada5",
+        "scales_fp16": "3f6e3afe2ab117cb26e6b6bc68c6a523adb1f5cccc15ebbb1f30d88bcca0eae5",
+        "scales_q28": "bdd8283b8e8a0409ac5888d924b153ea5daddacd3423b51cc352e39d6792a84b",
+        "output_q10": "d4348c1a5a4375a15c2325f07d8336efb2fc2c2efc39b79ba2997cdc6175cdc8",
+        "payload_512b": "f8bcd1c3a507a14f4c3cc1f49d1de319fb54d371fe6b95c521949c818910e918"
+      }
+    },
+    {
+      "token_id": 151935,
+      "slot_ctrl_addr": 19447680,
+      "slot_byte_offset": 77790720,
+      "scale_fp16_min": 0.00244140625,
+      "scale_fp16_max": 0.00763702392578125,
+      "output_q10_min": -35,
+      "output_q10_max": 55,
+      "output_saturated_count": 0,
+      "max_abs_q10_quantization_error": 0.00048828125,
+      "mean_abs_q10_quantization_error": 0.00018387607165745327,
+      "preview": {
+        "quantized_int4_first16": [1, -1, 1, 1, -1, 1, -2, 4, 0, -2, -2, 3, -4, -4, 4, 4],
+        "scales_q28": [1081344, 1338368, 1329152, 1062912, 2050048, 1072128, 917504, 1525760, 1441792, 1072128, 655360, 1235968, 1984512, 992256],
+        "output_q10_first16": [4, -4, 4, 4, -4, 4, -8, 16, 0, -8, -8, 12, -16, -16, 16, 16]
+      },
+      "sha256": {
+        "quantized_int4": "abfa8458b7aff033a3acb6d0952626da52b7f56e91cc48899db39770ef40f7c9",
+        "scales_fp16": "af4711131c59fc6e76717ab7e31c95584efe32fef18a04a2b32d990f970c6b75",
+        "scales_q28": "7d6934c10da70f2893e377ae5d9cbc6e19db3296033040cf67aeeeeb863b2b9e",
+        "output_q10": "b10edc1533867b2fa584fe03b2d0f782b15433afbbb85b62da1aa241c9c9be97",
+        "payload_512b": "bc126ee3eca1f938022b60f5f9d799cd3daaa9ccc00d98154dab4fde8015dc09"
+      }
+    }
+  ]
+}

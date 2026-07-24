@@ -637,9 +637,62 @@ UART 上传 A[896]、B[896] 和 65 个 PWL 端点
 
 开发中修复了两类问题：首版 SiLU 小乘法、64 位 RNE 和端点加法形成长组合路径；拆成窄位寄存流水后时序通过。首次固定上板仅最高 PWL 段 3 个元素错误，根因是 6 位 `63+1` 索引回绕到 0；改用 7 位端点索引后固定和随机测试全部通过。
 
-## 十四、当前项目状态
+## 十四、2026-07-24 新完成：E3 真实 tied Embedding K=896
 
-当前已经完成八级真实闭环：
+新增独立工程、软件参考、固定清单和上位机：
+
+```text
+model_tools/embedding_fixed_reference.py
+model_tools/test_embedding_fixed_reference.py
+model_tools/embedding_k896_reference.json
+embedding_k896/rtl/embedding_k896_core.v
+embedding_k896/rtl/embedding_k896_ctrl.v
+embedding_k896/rtl/embedding_k896_top.v
+embedding_k896/pnr/build_embedding_k896.tcl
+embedding_k896/pnr/program_sram.tcl
+embedding_k896/README.md
+tools/pangu_embedding_k896_host.py
+```
+
+真实对象为 tied `model.embed_tokens.weight`，shape=`[151936,896]`，storage=`int4_groupwise_symmetric`，group size=64，每行 14 groups，Token ID 有效范围为 `0..151935`。
+
+DDR3 行槽和定点路径：
+
+```text
+row_base_ctrl_addr = token_id << 7
+每个 Token 固定 512 B / 16 个 256 bit 拍
+→ 448 B packed signed INT4
+→ 56 B / 14 个 UQ4.28 scale
+→ 8 B padding
+→ signed INT4 × unsigned UQ4.28
+→ RNE 右移 18 位
+→ signed Q6.10 int16 显式饱和
+→ 896 个输出写回 DDR3 并经 UART 返回
+```
+
+真实 embedding 的全部 FP16 scales 均可被 UQ4.28 精确表示，因此硬件固定路径与直接执行 `round_to_nearest_even(INT4 * FP16_scale * 2^10)` 逐位一致。
+
+验证结果：
+
+- E3 单元测试：11/11 PASS；
+- 完整 `model_tools` 回归：45/45 PASS；
+- 真实 P50 软件/载荷随机压力：1000/1000 PASS，seed=`20260728`；
+- 最大 Q6.10 量化误差：`0.00048828125`，不超过 0.5 个 Q10 LSB；
+- 四个固定 Token ID `[0,1,2026,151935]` 的 896 个输出真实上板逐位一致，总耗时约 0.93 秒；
+- 真实随机 Token ID 上板压力：300/300 PASS，seed=`20260728`，约 75.53 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功；
+- 最终未布线网络：0；
+- 资源：7637 LUT、7380 FF、326 个 distributed RAM、2 APM、0 DRM；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.679 ns`、TNS=0，WHS=`+0.172 ns`、THS=0；快角 WNS=`+2.964 ns`、TNS=0，WHS=`+0.101 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`embedding_k896\pnr\generate_bitstream\embedding_k896_top.sbit`；
+- 位流 SHA256：`cd0e138e494875035cf5c66d76eaf250729625c172bf51c935b831d31c45c0fa`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K EMBEDDING K896 V1`，DDR3 初始化成功。
+
+## 十五、当前项目状态
+
+当前已经完成九级真实闭环：
 
 ```text
 长度16单点积
@@ -650,34 +703,33 @@ UART 上传 A[896]、B[896] 和 65 个 PWL 端点
 → 真实 layer0 q_proj M896K896 完整 Linear 层闭环
 → 真实 layer0 input_layernorm K896 定点 RMSNorm 闭环
 → K896 残差、缩放、元素乘法和 PWL64 SiLU 闭环
+→ 真实 tied Embedding Token 行查表与 Q6.10 格式转换闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、RMSNorm 平方和/均值/LUT rsqrt、元素级 RNE/饱和/PWL 非线性、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、RMSNorm 平方和/均值/LUT rsqrt、元素级 RNE/饱和/PWL 非线性、Token 稀疏行地址和 Embedding 格式转换、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 Linear、RMSNorm 和元素级基础算子已经完成，尚未实现 Embedding、Attention、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Linear、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成完整 Q/K/V、RoPE、Attention、MLP、Transformer Block 和文本生成。
 
-## 十五、下一阶段路线
+## 十六、下一阶段路线
 
-### 当前唯一下一步：E3 Embedding/查表
+### 当前唯一下一步：F1 Q/K/V 线性层
 
-1. 确认真实 `model.embed_tokens.weight` 的形状、INT4 分组格式、行布局和 Token ID 边界。
-2. 建立 Token ID 到 embedding 行地址及 14 个 group scale 地址的 Python 硬件等价参考。
-3. 明确 packed INT4 + FP16 scale 转换为统一 signed Q6.10 激活时的 RNE、饱和和误差规则。
-4. 新建独立 K=896 Embedding 工程，不覆盖任何已有验证工程和位流。
-5. 完成 DDR3 按 Token ID 读取一行权重、分组反量化/格式转换、结果写回和 Python 逐元素比较。
-6. 完成边界 Token ID、随机 Token ID、PDS 全流程、多角时序和真实上板验证。
-
-真实元数据已确认：`model.embed_tokens.weight` 的 shape 为 `[151936, 896]`，storage 为 `int4_groupwise_symmetric`，全局 group size 为 64。
+1. 基于 layer0 真实 `q_proj/k_proj/v_proj` 建立统一软件参考；真实形状分别为 `[896,896]`、`[128,896]`、`[128,896]`，均为 INT4 group size 64。
+2. 复用已验证完整 q_proj 的逐组 UQ4.28、signed INT64 Q28 数据通路，补齐 K/V 权重、scale、bias 和完整输出金标准。
+3. 明确 Qwen2.5-0.5B 的 GQA 输出布局：14 个 Q heads、2 个 KV heads、`head_dim=64`。
+4. 新建可按投影类型运行的独立 QKV 工程，不覆盖任何已有验证工程和位流。
+5. 完成 Q/K/V 全输出、head 排列、固定与随机真实 hidden state 的 Python 逐元素比较。
+6. 完成 PDS 全流程、多角时序、真实上板和随机压力验证。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. 元素级运算。
-2. Embedding/查表。
-3. Q/K/V 线性层。
-4. RoPE。
-5. Attention。
+1. Q/K/V 线性层。
+2. RoPE。
+3. KV Cache。
+4. Attention Score 与 Softmax。
+5. Attention 输出。
 6. MLP。
 7. Transformer Block。
 8. 完整模型权重加载与分层调度。

@@ -106,10 +106,13 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
 | `elementwise_k896_reference.json` | E2 固定边界向量、SiLU 全输入域误差和关键数组 SHA256 |
+| `embedding_fixed_reference.py` | E3 Token 行地址、真实 packed INT4/FP16 scale 到 UQ4.28/Q6.10 的硬件等价参考 |
+| `embedding_k896_reference.json` | E3 固定 Token 的地址、载荷、输出范围和 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
 | `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
+| `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
 
 ## 6. 常用命令
 
@@ -216,6 +219,23 @@ python tools\pangu_elementwise_k896_host.py selftest ^
 ```
 
 E2 统一使用 signed Q6.10 输入、标量和输出。残差加法显式饱和；缩放和元素乘法在 signed Q12.20 中计算，经 RNE 右移 10 位后饱和。SiLU 第一版选择覆盖 `[-8,8)` 的 64 段端点分段线性方案，区间外采用 `x<-8 -> 0`、`x>=8 -> x`。完整协议和地址布局见 `elementwise_k896/README.md`。
+
+生成 E3 真实 tied Embedding 固定 Token 清单：
+
+```bat
+python model_tools\embedding_fixed_reference.py ^
+  --token-id 0 ^
+  --manifest model_tools\embedding_k896_reference.json
+```
+
+运行真实 P50 Embedding 行、512 B 载荷和 1000 个随机 Token 软件自检：
+
+```bat
+python tools\pangu_embedding_k896_host.py selftest ^
+  --rounds 1000 --seed 20260728
+```
+
+E3 使用 `model.embed_tokens.weight[151936,896]`。每个 Token 行固定为 448 B packed INT4、14 个 UQ4.28 scale 和 8 B padding；`row_base_ctrl_addr=token_id<<7`。每个元素执行 signed INT4 × unsigned UQ4.28，经 RNE 右移 18 位后得到 signed Q6.10 int16。完整协议、地址布局和上板证据见 `embedding_k896/README.md`。
 
 ## 7. 真实 Linear 量化与定点定义
 
@@ -335,3 +355,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 完整 `model_tools` 回归 34/34 PASS；
 - 软件和上传载荷随机压力 1000/1000 PASS，seed=`20260727`;
 - 固定清单：`elementwise_k896_reference.json`。
+
+2026-07-24 建立 E3 真实 tied Embedding 定点软件参考：
+
+- 真实张量：`model.embed_tokens.weight`，shape=`[151936,896]`，group size=64，每行 14 groups；
+- Token ID 有效范围：`0..151935`，DDR3 控制器行地址为 `token_id<<7`；
+- 每行 512 B：448 B packed signed INT4、56 B UQ4.28 scale、8 B padding；
+- 全部真实 FP16 embedding scales 均可被 UQ4.28 精确表示；
+- 输出执行 RNE 右移 18 位并显式饱和为 signed Q6.10 int16；
+- 固定 Token `[0,1,2026,151935]` 的固定路径与直接 Q10 逐位一致；
+- E3 单元测试 11/11 PASS；完整 `model_tools` 回归 45/45 PASS；
+- 真实随机 Token 软件/载荷压力 1000/1000 PASS，seed=`20260728`；
+- 最大 Q6.10 量化误差 `0.00048828125`，未发生输出饱和；
+- 固定清单：`embedding_k896_reference.json`。

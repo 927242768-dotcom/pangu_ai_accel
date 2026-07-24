@@ -15,6 +15,7 @@
 9. [`gemv_int4_qproj_full/README.md`](gemv_int4_qproj_full/README.md)：已验证的 layer0 q_proj 完整 M=896、K=896 真实 Linear 层闭环。
 10. [`rmsnorm_k896/README.md`](rmsnorm_k896/README.md)：已验证的 layer0 input_layernorm K=896 定点 RMSNorm 闭环。
 11. [`elementwise_k896/README.md`](elementwise_k896/README.md)：已验证的 K=896 残差、缩放、元素乘法和 PWL64 SiLU 闭环。
+12. [`embedding_k896/README.md`](embedding_k896/README.md)：已验证的真实 tied Embedding Token 行地址、INT4/UQ4.28 到 Q6.10 闭环。
 
 ## 当前状态
 
@@ -48,15 +49,16 @@ E1 RMSNorm 也已完成。独立工程 `rmsnorm_k896` 对真实 `model.layers.0.
 
 E2 元素级运算现已完成。独立工程 `elementwise_k896` 支持 signed Q6.10 残差加法、定点缩放、元素乘法和 64 段端点 PWL SiLU，统一使用 RNE 与显式饱和。PWL64 在完整 int16 输入域最大误差为 4 Q10 LSB，端点表仅 1040 bit。四种操作的固定 K=896 向量均与 Python 逐位一致；软件随机 `1000/1000 PASS`，真实上板随机累计 `300/300 PASS`。PDS 全流程、多角建立/保持/恢复/移除均通过，慢角 100 MHz WNS=`+0.580 ns`、TNS=0；位流 SHA256=`809b436f1c369d66a20c5f2faaa8e684a15a3963d659b95d080e342c3a7d9d50`。
 
+E3 Embedding/查表现已完成。独立工程 `embedding_k896` 对真实 tied `model.embed_tokens.weight`（shape `[151936,896]`、group size 64）实现 Token ID 到 512 B DDR3 行槽映射，读取 448 B packed signed INT4 和 14 个 UQ4.28 scale，逐元素 RNE 转为 signed Q6.10。四个固定 Token `[0,1,2026,151935]` 的 896 个输出均与 Python 逐位一致；软件/载荷随机 `1000/1000 PASS`，真实上板随机 `300/300 PASS`。PDS 全流程和所有角时序通过，慢角 100 MHz WNS=`+0.679 ns`、TNS=0；位流 SHA256=`cd0e138e494875035cf5c66d76eaf250729625c172bf51c935b831d31c45c0fa`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 E3 Embedding/查表：真实元数据已确认 `model.embed_tokens.weight` 的 shape 为
-`[151936, 896]`、storage 为 `int4_groupwise_symmetric`、group size 为 64。先建立
-Token ID 到 embedding 行及 14 个 scale 的地址参考，确定 packed INT4 + FP16 scale
-转换为 signed Q6.10 激活的 RNE、饱和和误差规则；再新建独立 K=896 Embedding 工程，
-完成 DDR3 行读取、格式转换、结果回写、边界/随机 Token ID、PDS、多角时序和真实上板验证。
-不得覆盖任何已有验证工程和位流。
+进入 F1 Q/K/V 线性层：真实 layer0 张量为 q_proj=[896,896]、k_proj=[128,896]、
+v_proj=[128,896]，均为 INT4 group size 64；模型采用 14 个 Q heads、2 个 KV heads、
+head_dim=64 的 GQA。复用已验证完整 q_proj 数据通路，先建立 K/V 的真实 Q28 软件参考、
+bias/scale 载荷和 Q/K/V head 布局，再新建可按投影类型运行的独立 QKV 工程，完成固定与
+随机 hidden state、PDS、多角时序和真实上板验证。不得覆盖任何已有验证工程和位流。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。
