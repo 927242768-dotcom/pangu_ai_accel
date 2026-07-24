@@ -512,3 +512,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 固定清单、4608 B 上传载荷往返和随机/边界压力 1000/1000 PASS，seed=`20260807`；覆盖全零、`INT16_MIN/MAX`、常量、稀疏、小幅值和完整 int16 随机输入；
 - 固定真实 Attention 输入中 LUT256 相对精确 rsqrt 路径最大差值为 2 Q10 LSB；完整 int16 极端软件压力中的最大差值为 8 Q10 LSB；
 - 固定清单：`post_attention_layernorm_g1_reference.json`；上位机：`../tools/pangu_post_attention_layernorm_host.py`。
+
+
+2026-07-24 建立 G1 layer0 MLP `gate_proj`/`up_proj` 真实双投影软件参考：
+
+- 输入直接复用 G1 `post_attention_layernorm` 四组 `[896]` signed Q6.10 输出，query/count 为 `0/1`、`1/2`、`5/6`、`15/16`；
+- 真实权重分别为 `model.layers.0.mlp.gate_proj.weight` 和 `model.layers.0.mlp.up_proj.weight`，shape 均为 `[4864,896]`、group size 64、每行 14 groups 的对称 signed INT4；
+- 两路 `.p50` 均不存在 bias，软件和硬件通用 bias 槽固定全零；
+- 两路共享完全相同的逐向量对称 INT8 激活和 activation scale，combined scale 为 UQ4.28；每组 signed INT32 点积后在 signed int64 Q28 中跨 14 groups 累加；
+- 每路完整上传载荷为 2646912 B，结果为 38912 B；packed INT4、padded scale、zero bias 和输出均执行往返校验；
+- 四组 gate 输出 SHA256 为 `4c1c79e1...cea4e`、`42bbe0f3...03c3`、`869b64d8...34dc`、`449c12f1...f7f6`；up 输出 SHA256 为 `9794e50e...05a0`、`7eb40a12...cc62`、`6b09b2ba...d31d`、`03eca75b...8041`；
+- 新增单元测试 6/6 PASS；完整 `model_tools` 回归 116/116 PASS；
+- 双投影软件随机/边界压力 1000/1000 PASS，seed=`20260808`，覆盖全零、交替 `INT16_MIN/MAX`、常量、稀疏、小幅值和一般/完整 int16 随机输入；
+- 固定清单：`mlp_gate_up_g1_reference.json`；上位机：`../tools/pangu_mlp_gate_up_host.py`。

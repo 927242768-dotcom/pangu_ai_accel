@@ -1187,22 +1187,70 @@ F6 Attention 至此完整通过，允许进入 G1 MLP。
 
 G1 MLP 输入 `post_attention_layernorm` 至此完整通过，允许进入 gate/up projection。
 
-## 二十六、最新项目状态与唯一下一任务
+## 二十六、G1 gate_proj 与 up_proj 真实双投影完成记录
 
-当前已完成十八级真实闭环，在 F6 完整 layer0 Attention 子层之后新增：
+本轮新增独立 `mlp_gate_up_g1` 工程，未修改或覆盖已验证的 q_proj、QKV、Attention、RMSNorm 工程和位流。两路投影直接消费上一阶段已经真实上板逐位通过的 `post_attention_layernorm` `[896]` signed Q6.10 输出。
+
+真实模型参数：
+
+- `model.layers.0.mlp.gate_proj.weight`：shape=`[4864,896]`，group size 64，对称 signed INT4，每行 14 groups；
+- `model.layers.0.mlp.up_proj.weight`：shape=`[4864,896]`，group size 64，对称 signed INT4，每行 14 groups；
+- 两路 `.p50` 均不存在 bias；硬件通用 bias 槽全零；
+- 两路共享完全相同的逐向量对称 INT8 激活和 activation scale；combined scale 为 UQ4.28；输出为 signed int64 Q28 `[4864]`。
+
+软件与载荷：
+
+- 新增 `model_tools/mlp_gate_up_reference.py`、固定清单 `model_tools/mlp_gate_up_g1_reference.json` 和 6 项单元测试；
+- 四组 query/count=`0/1、1/2、5/6、15/16` 的 gate 输出 SHA256 分别为：
+  - `4c1c79e14e8f788aeaaaea64924863f847ca276fd8b99b7406cfb6a50fbcea4e`
+  - `42bbe0f30579275a6411abd9ad020639e0aedb9060efdccb544f5e5f4a3203c3`
+  - `869b64d81d6c5f2cacc314fd869a2e20eceee7014571b0974595a81b8acf34dc`
+  - `449c12f1f2904a1c4f56892a4c7049f7c785862b4c9ad9b7922b1990f161f7f6`
+- 对应 up 输出 SHA256 分别为：
+  - `9794e50eb90d560dfcfb55a2e54687ea3e3dcd06da368aeb557885c5e2a605a0`
+  - `7eb40a12c870187737f47231342d02806f30a87076575cf4e00aecb361dfcc62`
+  - `6b09b2ba30bba3ffb742cbd6ebf8a257322b78f779e5c1b86ffacdc2cb96d31d`
+  - `03eca75bbbb7e9849f549124ddc1a0e4506f4bb64bb79daf769ec01d2d368041`
+- 每路上传载荷 2646912 B：896 B activation、2179072 B packed weight、311296 B padded UQ4.28 scale、155648 B zero bias；结果 38912 B；
+- 新增测试 6/6 PASS，完整 `model_tools` 回归 116/116 PASS；
+- 软件随机/边界 1000/1000 PASS，seed=`20260808`，覆盖全零、交替 `INT16_MIN/MAX`、常量、稀疏、小幅值和一般/完整 int16 随机输入。
+
+PDS 与位流：
+
+- Compile、Synthesize、Device Map、Place & Route、Timing、Bitstream 全部成功，最终未布线网络为 0；
+- 资源：8548 LUT、7628 FF、326 个 distributed RAM、4 DRM、12 APM、79 IO；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.916 ns`、TNS=0，hold WHS=`+0.157 ns`、THS=0；快角 setup WNS=`+3.046 ns`、TNS=0，hold WHS=`+0.089 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`mlp_gate_up_g1/pnr/generate_bitstream/mlp_gate_up_top.sbit`，大小 2101696 B；
+- 位流 SHA256：`e72959d2968a543bf3a2bcfd31f2b2c7a0d31a9888daba9ceac2d7c50cd5db6b`。
+
+真实上板：
+
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件 `PANGU50K MLP GATEUP V1`，DDR3 初始化成功；
+- 四组连贯真实输入的 gate/up 共 8 个完整投影全部 `4864/4864` 逐位一致；
+- 单路完整上传、计算和回读约 232.99~233.26 秒；
+- gate 和 up 各通过全零、交替 INT16 极值、一般随机 3/3，双路合计 6/6 PASS，seed=`20260808`，mode index=`0/1/6`。
+
+G1 gate/up 双投影至此完整通过，允许进入 `SiLU(gate)`。
+
+## 二十七、最新项目状态与唯一下一任务
+
+当前已完成十九级真实闭环，在完整 layer0 Attention 子层之后形成：
 
 ```text
 完整 Attention 子层 signed Q6.10 输出
 → 真实 layer0 post_attention_layernorm
-→ G1 MLP 输入 signed Q6.10 闭环
+→ 共享 INT8 激活
+├─ 真实 gate_proj [4864] signed int64 Q28
+└─ 真实 up_proj   [4864] signed int64 Q28
 ```
 
-当前仍不是完整 Qwen 推理；尚未完成 layer0 MLP 的 gate/up、SiLU、down projection、第二处残差，亦未完成完整 Transformer Block、全模型分层调度、LM Head 和文本生成。
+当前仍不是完整 Qwen 推理；尚未完成 `SiLU(gate)`、`SiLU(gate) × up`、down projection、第二处残差，亦未完成完整 Transformer Block、全模型分层调度、LM Head 和文本生成。
 
-### 当前唯一下一任务：G1 gate_proj 与 up_proj 双投影
+### 当前唯一下一任务：G1 SiLU(gate)
 
-1. 两路都直接消费本阶段已真实上板通过的 `[896]` signed Q6.10 post-attention RMSNorm 输出。
-2. 真实权重分别为 `model.layers.0.mlp.gate_proj.weight` 与 `model.layers.0.mlp.up_proj.weight`，shape 均为 `[4864,896]`，group size 64，对称 groupwise INT4，每行 14 groups。
-3. 建立同一输入来源的双投影软件参考、固定清单和完整上传布局，明确逐向量对称 INT8 激活、UQ4.28 combined scale、signed int64 Q28 与 bias 规则。
-4. 建立独立硬件调度、DDR3 流式读取与结果回写，完成固定真实输入、随机/边界、PDS 全流程、多角时序、JTAG SRAM 和真实上板逐位压力测试。
-5. gate/up 两路全部通过前不得进入 SiLU(gate) 或 `SiLU(gate) × up`。
+1. 输入必须直接来自本阶段已真实上板逐位通过的 gate_proj `[4864]` signed int64 Q28 输出。
+2. 首先固定 Q28 到 SiLU 输入格式的缩放、round-to-nearest-even 和正负饱和规则，禁止隐含截断。
+3. 复用或扩展已验证 E2 SiLU 定点/PWL 定义，建立四组连贯真实输入、随机/边界软件参考和固定清单。
+4. 建立独立硬件流式调度，完成 PDS 全流程、多角时序、JTAG SRAM 和真实上板逐位压力测试。
+5. `SiLU(gate)` 单独全部通过前不得进入 `SiLU(gate) × up`。

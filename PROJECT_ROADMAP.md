@@ -604,8 +604,8 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 ### G1 MLP
 
 - [x] MLP 输入 `post_attention_layernorm`
-- [ ] gate projection
-- [ ] up projection
+- [x] gate projection
+- [x] up projection
 - [ ] SiLU(gate)
 - [ ] SiLU(gate) × up
 - [ ] down projection
@@ -622,6 +622,18 @@ G1 MLP 输入 `post_attention_layernorm` 验证证据（2026-07-24）：
 - 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.411 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；快角 setup WNS=`+2.857 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复和移除无违例；
 - 位流：`post_attention_layernorm_g1/pnr/generate_bitstream/rmsnorm_k896_top.sbit`，大小 2101696 B，SHA256=`b8c87ee10edf435617ab110cfdf0cf2a8d3c3ad3d3b91748c80ef04363305ec2`；
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash，DDR3 初始化成功；真实 FPGA 随机/边界 300/300 PASS，seed=`20260807`，耗时 182.74 秒。
+
+G1 `gate_proj` 与 `up_proj` 真实双投影验证证据（2026-07-24）：
+
+- 新增独立 `mlp_gate_up_g1` 工程，两路直接消费上述四组 `[896]` signed Q6.10 post-attention RMSNorm 输出；真实 gate/up 权重 shape 均为 `[4864,896]`、group size 64、每行 14 groups 的对称 signed INT4，`.p50` 均不存在 bias；
+- 两路严格共享同一份逐向量对称 INT8 激活；主机预计算 UQ4.28 combined scale，硬件按 64 元素 signed INT32 点积并在 signed int64 Q28 中跨 14 groups 累加；通用 bias 槽全零；
+- 四组 query/count=`0/1、1/2、5/6、15/16` 的 gate/up 共 8 个完整 `[4864]` 输出全部真实上板 `4864/4864` 逐位一致；对应输出 SHA256 已固定在 `model_tools/mlp_gate_up_g1_reference.json`；
+- 新增单元测试 6/6 PASS，完整 `model_tools` 回归 116/116 PASS；双投影软件随机/边界 1000/1000 PASS，seed=`20260808`；
+- 真实 FPGA gate/up 各覆盖全零、交替 `INT16_MIN/MAX` 和一般随机输入 3/3 PASS，双路合计 6/6 PASS；每路 2646912 B 完整上传、计算和 38912 B 回读约 232.99~233.26 秒；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，最终未布线网络为 0；资源为 8548 LUT、7628 FF、326 个 distributed RAM、4 DRM、12 APM、79 IO；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.916 ns`、TNS=0，hold WHS=`+0.157 ns`、THS=0；快角 setup WNS=`+3.046 ns`、TNS=0，hold WHS=`+0.089 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`mlp_gate_up_g1/pnr/generate_bitstream/mlp_gate_up_top.sbit`，大小 2101696 B，SHA256=`e72959d2968a543bf3a2bcfd31f2b2c7a0d31a9888daba9ceac2d7c50cd5db6b`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K MLP GATEUP V1`，DDR3 初始化成功；gate/up 已全部通过，现允许进入 `SiLU(gate)`，但不得提前执行乘法。
 
 ### G2 单个 Transformer Block
 
@@ -838,6 +850,14 @@ G1 MLP 输入 `post_attention_layernorm` 验证证据（2026-07-24）：
 | `post_attention_layernorm_g1/pnr/program_sram.tcl` | G1 独立位流仅下载 FPGA 易失性 SRAM 的脚本 |
 | `post_attention_layernorm_g1/README.md` | G1 复用边界、定点规则、固定输入、时序、位流和真实上板证据 |
 | `tools/pangu_post_attention_layernorm_host.py` | G1 软件自检、四组真实固定和随机/边界上板逐位比较工具 |
+| `model_tools/mlp_gate_up_reference.py` | G1 gate/up 共享输入量化、真实双权重、Q28 独立重算和载荷金标准 |
+| `model_tools/mlp_gate_up_g1_reference.json` | G1 四组真实 gate/up 完整输出和关键载荷 SHA256 清单 |
+| `model_tools/test_mlp_gate_up_reference.py` | G1 双投影 shape、共享激活、无 bias、载荷、独立重算和零输入测试 |
+| `mlp_gate_up_g1/rtl/mlp_gate_up_ctrl.v` | G1 4864 行 DDR3 流式 Linear 控制器 |
+| `mlp_gate_up_g1/pnr/build_mlp_gate_up.tcl` | G1 gate/up 独立 PDS 全流程构建脚本 |
+| `mlp_gate_up_g1/pnr/program_sram.tcl` | G1 gate/up 位流仅下载 FPGA 易失性 SRAM 的脚本 |
+| `mlp_gate_up_g1/README.md` | G1 双投影定点、载荷、时序、位流和真实上板证据 |
+| `tools/pangu_mlp_gate_up_host.py` | G1 gate/up 软件自检、四组固定和随机/边界上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -855,10 +875,9 @@ G1 MLP 输入 `post_attention_layernorm` 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-G1 MLP 的唯一下一任务：完成 layer0 `gate_proj` 与 `up_proj` 的真实双投影闭环。两路都必须直接消费
-已经真实上板逐位通过的 `post_attention_layernorm` `[896]` signed Q6.10 输出；真实权重均为
-`[4864,896]`、group size 64 的对称 groupwise INT4。建立同一输入来源的双投影软件参考、完整载荷、
-独立硬件调度和流式结果回写，明确激活 INT8、UQ4.28 combined scale、signed int64 Q28、无/有 bias
-规则，并完成固定真实输入、随机/边界、PDS 全流程、多角时序、JTAG SRAM 和逐位压力测试。
-gate/up 两路全部通过前不得进入 SiLU(gate) 或 `SiLU(gate) × up`。
+G1 MLP 的唯一下一任务：完成 layer0 `SiLU(gate)` 的真实非线性闭环。输入必须直接来自本阶段已经
+真实上板逐位通过的 gate_proj `[4864]` signed int64 Q28 输出；首先固定 Q28 到 SiLU 输入格式的
+RNE、缩放和正负饱和规则，再复用或扩展已验证的 SiLU 定点/PWL 定义，建立四组连贯真实输入、
+随机/边界软件参考、独立硬件流式调度、PDS 全流程、多角时序、JTAG SRAM 和逐位上板压力测试。
+`SiLU(gate)` 单独全部通过前不得执行 `SiLU(gate) × up`。
 ```

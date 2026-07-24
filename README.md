@@ -78,13 +78,15 @@ F6 Attention 残差与完整子层现已完成。独立工程 `attention_residua
 
 G1 MLP 输入 `post_attention_layernorm` 现已完成。独立工程 `post_attention_layernorm_g1` 直接消费上述四组 1/2/6/16-token 完整 Attention 子层 `[896]` signed Q6.10 输出，并读取真实 `model.layers.0.post_attention_layernorm.weight`；数值规则严格复用但隔离 E1 RMSNorm 的 Q6.10、Q12.20、LUT256 UQ12.20 rsqrt、RNE 和显式饱和。四组固定输出全部 896/896 上板逐位一致；新增测试 `5/5 PASS`，完整软件回归 `110/110 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡 `300/300 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.411 ns`、TNS=0、hold WHS=`+0.169 ns`、THS=0；位流 SHA256=`b8c87ee10edf435617ab110cfdf0cf2a8d3c3ad3d3b91748c80ef04363305ec2`。
 
+G1 MLP `gate_proj` 与 `up_proj` 真实双投影现已完成。独立工程 `mlp_gate_up_g1` 直接消费上述四组 `[896]` signed Q6.10 post-attention RMSNorm 输出，两路真实权重均为 `[4864,896]`、group size 64 的对称 signed INT4，且均无 bias；两路共享同一份逐向量对称 INT8 激活，combined scale 为 UQ4.28，输出为 signed int64 Q28。四组连贯输入共 8 个完整投影全部 `4864/4864` 上板逐位一致；新增测试 `6/6 PASS`，完整软件回归 `116/116 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡全零/极值/一般随机双路合计 `6/6 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.916 ns`、TNS=0、hold WHS=`+0.157 ns`、THS=0；位流 SHA256=`e72959d2968a543bf3a2bcfd31f2b2c7a0d31a9888daba9ceac2d7c50cd5db6b`。
+
 ## 当前唯一下一任务
 
 ```text
-完成 layer0 MLP `gate_proj` 与 `up_proj` 的真实双投影闭环。两路都消费已经真实上板逐位通过的
-post_attention_layernorm `[896]` signed Q6.10 输出，权重均为 `[4864,896]`、group size 64 的
-对称 groupwise INT4。建立同一输入来源的软件参考、完整载荷、独立硬件调度和逐位上板闭环；
-gate/up 全部通过前不得进入 SiLU(gate) 或 SiLU(gate) × up。
+完成 layer0 MLP `SiLU(gate)` 的真实非线性闭环。输入直接来自已经真实上板逐位通过的 gate_proj
+`[4864]` signed int64 Q28 输出；先固定 Q28 到 SiLU 输入格式的 RNE、缩放和饱和规则，再完成
+软件金标准、独立硬件流式调度、PDS、多角时序、JTAG SRAM 和真实上板逐位压力测试。
+SiLU(gate) 全部通过前不得进入 SiLU(gate) × up。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。
