@@ -1,0 +1,123 @@
+{
+  "format_version": 1,
+  "operator": "qwen2_layer0_post_attention_layernorm",
+  "definition": {
+    "input_source": "verified coherent layer0 Attention residual output",
+    "gamma_tensor": "model.layers.0.post_attention_layernorm.weight",
+    "length": 896,
+    "epsilon": 1e-06,
+    "input": "signed Q6.10 int16 [896]",
+    "gamma": "signed Q6.10 int16 [896]",
+    "sum_squares": "unsigned 40-bit with 20 fractional bits",
+    "mean_and_epsilon": "Q12.20, epsilon_q20=1",
+    "rsqrt": "LUT256 midpoint unsigned UQ12.20",
+    "rounding": "round_to_nearest_even",
+    "output": "signed Q6.10 int16 [896] with explicit saturation",
+    "upload_bytes": 4608,
+    "result_bytes": 1792,
+    "fixed_queries": [
+      0,
+      1,
+      5,
+      15
+    ]
+  },
+  "cases": [
+    {
+      "label": "layer0 post_attention_layernorm query=0, count=1",
+      "query_position": 0,
+      "count": 1,
+      "sum_squares": 4938587128,
+      "variance_q20": 5511817,
+      "lut_rsqrt_q20": 457296,
+      "input_clipped_count": 0,
+      "gamma_clipped_count": 0,
+      "output_saturated_count": 0,
+      "sha256": {
+        "attention_output_input_q10": "36859690e421b96cb8db65a5760a364d165a73b63fd1121040a7d1b42c042eb7",
+        "gamma_q10": "8528c6dd7c3a26264d1af12a852c3c536ffdd75d1aa2716733a6fb185b43dd1c",
+        "lut256_uq12_20": "76ff1e6f79b00b125ca32deeaf5e62444eb06b6194c8815aea76b45e69e224c1",
+        "output_exact_q10": "54051170883f510d94b157376c17b0210c5af15a90818190a2d3de7d45f9ef2c",
+        "output_lut_q10": "93d2d3ee866a7923e3ce9d450ae5d6e43a05c50daeaa952cae052c4584891f80",
+        "upload_payload": "161fc7834309ffede54ed8889f6455b789ce8f093bc5ae4bd342fa8e1c36fac1"
+      },
+      "preview": {
+        "input_first8_q10": [-1527, -4025, 2071, 454, -2516, 1200, 682, 1326],
+        "output_first8_q10": [-406, -1138, 519, 136, -673, 315, 191, 350],
+        "output_last8_q10": [-274, 55, -958, -230, -989, -803, 99, -835]
+      }
+    },
+    {
+      "label": "layer0 post_attention_layernorm query=1, count=2",
+      "query_position": 1,
+      "count": 2,
+      "sum_squares": 4952696256,
+      "variance_q20": 5527564,
+      "lut_rsqrt_q20": 456618,
+      "input_clipped_count": 0,
+      "gamma_clipped_count": 0,
+      "output_saturated_count": 0,
+      "sha256": {
+        "attention_output_input_q10": "2b4a2d9240e6e30c2afe2943fa30ac60decd47f8fc8d377ab7e530e516009378",
+        "gamma_q10": "8528c6dd7c3a26264d1af12a852c3c536ffdd75d1aa2716733a6fb185b43dd1c",
+        "lut256_uq12_20": "76ff1e6f79b00b125ca32deeaf5e62444eb06b6194c8815aea76b45e69e224c1",
+        "output_exact_q10": "eece5a04917e9df51b4ef89f2be0916e9e7455a63b4663f64ccf356a53ce9a11",
+        "output_lut_q10": "0ef1296dde8e999f6ac707725da227bd8f87b5da848a7a81113f422a03d0cbdf",
+        "upload_payload": "2bfecf16944d9bfc0fab38d5bae00346fac3765b314c7d0f33adbb89c02c60b0"
+      },
+      "preview": {
+        "input_first8_q10": [-721, -2222, -3784, -3833, 2525, -3607, 3509, -2483],
+        "output_first8_q10": [-191, -628, -946, -1147, 675, -945, 985, -655],
+        "output_last8_q10": [294, 33, -838, -704, -975, 277, 499, 1639]
+      }
+    },
+    {
+      "label": "layer0 post_attention_layernorm query=5, count=6",
+      "query_position": 5,
+      "count": 6,
+      "sum_squares": 4805428423,
+      "variance_q20": 5363202,
+      "lut_rsqrt_q20": 463537,
+      "input_clipped_count": 0,
+      "gamma_clipped_count": 0,
+      "output_saturated_count": 0,
+      "sha256": {
+        "attention_output_input_q10": "c0c0776d71e3dc97aa1a4d4e0709f38441cc82717c0c3081a79c47c30a21af10",
+        "gamma_q10": "8528c6dd7c3a26264d1af12a852c3c536ffdd75d1aa2716733a6fb185b43dd1c",
+        "lut256_uq12_20": "76ff1e6f79b00b125ca32deeaf5e62444eb06b6194c8815aea76b45e69e224c1",
+        "output_exact_q10": "fc4e16a57152b1447333d58173741ab6370291bfa2bc89b7f2d165c3794a6abd",
+        "output_lut_q10": "40965e0cb4d96cf8de644d4b7081df5acef34d6c24ec8cd6d448fac4943b83aa",
+        "upload_payload": "8d7c2d07605bd454158a79e01a5806bfe313f928fdd238a87e822efaca5a1bcc"
+      },
+      "preview": {
+        "input_first8_q10": [2543, -3183, -2628, 3589, -1884, 1767, -1551, -1325],
+        "output_first8_q10": [685, -912, -667, 1091, -511, 470, -442, -355],
+        "output_last8_q10": [362, -56, -370, -549, -940, -74, -7, 1289]
+      }
+    },
+    {
+      "label": "layer0 post_attention_layernorm query=15, count=16",
+      "query_position": 15,
+      "count": 16,
+      "sum_squares": 5136096039,
+      "variance_q20": 5732251,
+      "lut_rsqrt_q20": 448710,
+      "input_clipped_count": 0,
+      "gamma_clipped_count": 0,
+      "output_saturated_count": 0,
+      "sha256": {
+        "attention_output_input_q10": "7e61dc1fd0eb43b231e25fe1d08b1c08342723f537b6e25924858608235fa61e",
+        "gamma_q10": "8528c6dd7c3a26264d1af12a852c3c536ffdd75d1aa2716733a6fb185b43dd1c",
+        "lut256_uq12_20": "76ff1e6f79b00b125ca32deeaf5e62444eb06b6194c8815aea76b45e69e224c1",
+        "output_exact_q10": "97f184b2fdaa22dec43f4b8e4a13b54b8af94caea1ba3a1a067e276c885952f5",
+        "output_lut_q10": "fa574c09c76580173c62d59bd5a682cd35bb97b70d25459dcf0ac6e3808e48b1",
+        "upload_payload": "7946e4d0ba0c499a7ea001dd33a882692825dfe6938bac32abe127a03257abf3"
+      },
+      "preview": {
+        "input_first8_q10": [2482, -1546, -3831, 1644, -619, 2918, 2176, 1549],
+        "output_first8_q10": [647, -429, -941, 484, -163, 751, 600, 401],
+        "output_last8_q10": [-569, -272, 801, 877, -784, -916, -205, -1317]
+      }
+    }
+  ]
+}

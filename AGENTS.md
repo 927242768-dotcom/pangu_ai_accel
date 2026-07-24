@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表、F1 Q/K/V、F2 RoPE、F3 KV Cache、F4 Attention Score、F5 Softmax、F6 概率×V 加权和/多头拼接和真实 layer0 O_proj 均已完成。`attention_oproj_f6` 已消费 F6 `[896]` signed int64 Q28 拼接结果，按逐向量对称 INT8 规则运行真实 `self_attn.o_proj=[896,896]` groupwise INT4 权重；完整软件回归 100/100 PASS、软件随机 1000/1000 PASS、四组真实固定输入逐位一致、真实随机/边界 4/4 PASS，多角时序 TNS/THS=0。当前唯一下一任务是建立 Attention 残差和完整 layer0 Attention 子层闭环；完整 Attention 子层通过前不得进入 MLP，也不得覆盖任何已有验证工程和位流
+- 当前阶段：D1.3、D2、E1-E3、F1-F6 已完成，完整 layer0 Attention 子层已真实上板闭环；G1 MLP 输入 `post_attention_layernorm` 也已完成，四组连贯真实 Attention 输出逐位一致，完整软件回归 110/110 PASS、软件随机/边界 1000/1000 PASS、真实 FPGA 300/300 PASS，多角时序 TNS/THS=0。当前唯一下一任务是完成 layer0 `gate_proj` 与 `up_proj` 的真实 `[4864,896]` 双投影闭环；两路通过前不得进入 SiLU 或 gate×up，也不得覆盖任何已有验证工程和位流

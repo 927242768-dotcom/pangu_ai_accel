@@ -24,10 +24,11 @@
 18. [`attention_output_f6/README.md`](attention_output_f6/README.md)：已验证的 F5 概率×F3 V、14Q/2KV GQA、Q59 累加、RNE 和 `[14,64]/[896]` Attention 输出闭环。
 19. [`attention_oproj_f6/README.md`](attention_oproj_f6/README.md)：已验证的 F6 `[896]` Attention 输入量化、真实 layer0 O_proj M896K896 分组 INT4 和 signed int64 Q28 闭环。
 20. [`attention_residual_f6/README.md`](attention_residual_f6/README.md)：已验证的完整 layer0 Attention 连贯软件链、Q28→Q6.10 重标定和第一处残差闭环。
+21. [`post_attention_layernorm_g1/README.md`](post_attention_layernorm_g1/README.md)：已验证的真实 layer0 post_attention_layernorm、连贯 MLP 输入和独立 RMSNorm 闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj 与第一处残差的完整 layer0 Attention 子层闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、第一处残差的完整 layer0 Attention 子层，以及 G1 MLP 输入 `post_attention_layernorm` 闭环：
 
 ```text
 长度16单点积：
@@ -75,13 +76,15 @@ F6 Attention O_proj 现已完成。独立工程 `attention_oproj_f6` 将第一�
 
 F6 Attention 残差与完整子层现已完成。独立工程 `attention_residual_f6` 将真实 O_proj `[896]` signed int64 Q28 使用 signed RNE 右移 18 位并饱和到 signed Q6.10，再与对应原 hidden state 扩展相加并再次饱和。软件端首次建立同一批 hidden state 连贯经过 input RMSNorm、Q/K/V、RoPE、Score、Softmax、V 加权、多头拼接、O_proj 和残差的完整 layer0 Attention 参考链。1/2/6/16-token 四组固定输出全部上板逐位一致；完整软件回归 `105/105 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡随机/边界累计 `300/300 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+1.493 ns`、TNS=0、hold WHS=`+0.112 ns`、THS=0；位流 SHA256=`609e1f569aa1e4579cffb995b0d7d0bc89fa34529790b35e8b26d6778226bcbd`。
 
+G1 MLP 输入 `post_attention_layernorm` 现已完成。独立工程 `post_attention_layernorm_g1` 直接消费上述四组 1/2/6/16-token 完整 Attention 子层 `[896]` signed Q6.10 输出，并读取真实 `model.layers.0.post_attention_layernorm.weight`；数值规则严格复用但隔离 E1 RMSNorm 的 Q6.10、Q12.20、LUT256 UQ12.20 rsqrt、RNE 和显式饱和。四组固定输出全部 896/896 上板逐位一致；新增测试 `5/5 PASS`，完整软件回归 `110/110 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡 `300/300 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.411 ns`、TNS=0、hold WHS=`+0.169 ns`、THS=0；位流 SHA256=`b8c87ee10edf435617ab110cfdf0cf2a8d3c3ad3d3b91748c80ef04363305ec2`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 G1 MLP：先完成 layer0 post_attention_layernorm。输入为已经真实上板逐位通过的完整
-Attention 子层 `[896]` signed Q6.10 输出，读取真实 post_attention_layernorm.weight，复用但隔离
-已验证 RMSNorm 定点能力，建立连贯 MLP 输入软件参考和独立硬件闭环。该归一化通过前不得进入
-gate/up projection。
+完成 layer0 MLP `gate_proj` 与 `up_proj` 的真实双投影闭环。两路都消费已经真实上板逐位通过的
+post_attention_layernorm `[896]` signed Q6.10 输出，权重均为 `[4864,896]`、group size 64 的
+对称 groupwise INT4。建立同一输入来源的软件参考、完整载荷、独立硬件调度和逐位上板闭环；
+gate/up 全部通过前不得进入 SiLU(gate) 或 SiLU(gate) × up。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

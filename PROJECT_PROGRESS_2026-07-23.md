@@ -1147,3 +1147,62 @@ F6 Attention 至此完整通过，允许进入 G1 MLP。
 5. tokenizer、采样与文本推理验证。
 
 每一步都应保留“FPGA 结果与 Python 参考逐元素自动比较”的闭环，避免直接跳到完整模型后难以定位错误。
+
+
+## 二十五、G1 layer0 post_attention_layernorm 独立闭环（2026-07-24）
+
+本阶段完成 MLP 入口的真实 `post_attention_layernorm`，并保持与已验证 E1/F6 工程和位流隔离：
+
+```text
+完整 layer0 Attention 子层输出 [896] signed Q6.10
+→ mean(x²) + epsilon
+→ LUT256 UQ12.20 rsqrt
+→ x × rsqrt × 真实 post_attention_layernorm gamma
+→ RNE 与 signed int16 饱和
+→ MLP 输入 [896] signed Q6.10
+```
+
+真实参数与格式：
+
+- gamma：`model.layers.0.post_attention_layernorm.weight`，shape=`[896]`，源类型 BF16，`.p50` 中连续 FP16 1792 B；
+- epsilon=`1e-6`，Q12.20 中为 `1`；
+- input/gamma/output 为 signed Q6.10，平方和为 40 位，rsqrt 为 LUT256 midpoint unsigned UQ12.20；
+- 所有除法和右移使用 round-to-nearest-even，输出显式饱和。
+
+验证结果：
+
+- 软件固定输入直接使用 F6 已上板通过的四组完整 Attention 输出，query/count=`0/1、1/2、5/6、15/16`；输入 SHA256 与 F6 清单完全一致；
+- G1 四组输出 SHA256 分别为 `93d2d3ee866a7923e3ce9d450ae5d6e43a05c50daeaa952cae052c4584891f80`、`0ef1296dde8e999f6ac707725da227bd8f87b5da848a7a81113f422a03d0cbdf`、`40965e0cb4d96cf8de644d4b7081df5acef34d6c24ec8cd6d448fac4943b83aa`、`fa574c09c76580173c62d59bd5a682cd35bb97b70d25459dcf0ac6e3808e48b1`；
+- 新增单元测试 5/5 PASS；完整 `model_tools` 回归 110/110 PASS；
+- 软件固定清单、4608 B 载荷往返与随机/边界压力 1000/1000 PASS，seed=`20260807`；覆盖全零、交替 `INT16_MIN/MAX`、常量、稀疏、小幅值、一般和完整 int16 随机输入；
+- 固定输入中 LUT256 相对精确 rsqrt 路径最大差值为 2 Q10 LSB；完整 int16 极端软件压力中最大差值为 8 Q10 LSB；
+- 独立 `post_attention_layernorm_g1/pnr` 完成 Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream，最终未布线网络为 0；
+- 资源：8801 LUT、7051 FF、70 个 distributed RAM、12 DRM、9 APM、79 IO；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.411 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；快角 setup WNS=`+2.857 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复和移除无违例；
+- 位流：`post_attention_layernorm_g1\pnr\generate_bitstream\rmsnorm_k896_top.sbit`，大小 2101696 B；
+- 位流 SHA256：`b8c87ee10edf435617ab110cfdf0cf2a8d3c3ad3d3b91748c80ef04363305ec2`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件协议标识复用 `PANGU50K RMSNORM K896 V1`，DDR3 初始化成功；
+- 四组连贯真实固定输入全部 896/896 上板逐位一致，合计约 2.44 秒；
+- 真实 FPGA 随机/边界 300/300 PASS，seed=`20260807`，耗时 182.74 秒。
+
+G1 MLP 输入 `post_attention_layernorm` 至此完整通过，允许进入 gate/up projection。
+
+## 二十六、最新项目状态与唯一下一任务
+
+当前已完成十八级真实闭环，在 F6 完整 layer0 Attention 子层之后新增：
+
+```text
+完整 Attention 子层 signed Q6.10 输出
+→ 真实 layer0 post_attention_layernorm
+→ G1 MLP 输入 signed Q6.10 闭环
+```
+
+当前仍不是完整 Qwen 推理；尚未完成 layer0 MLP 的 gate/up、SiLU、down projection、第二处残差，亦未完成完整 Transformer Block、全模型分层调度、LM Head 和文本生成。
+
+### 当前唯一下一任务：G1 gate_proj 与 up_proj 双投影
+
+1. 两路都直接消费本阶段已真实上板通过的 `[896]` signed Q6.10 post-attention RMSNorm 输出。
+2. 真实权重分别为 `model.layers.0.mlp.gate_proj.weight` 与 `model.layers.0.mlp.up_proj.weight`，shape 均为 `[4864,896]`，group size 64，对称 groupwise INT4，每行 14 groups。
+3. 建立同一输入来源的双投影软件参考、固定清单和完整上传布局，明确逐向量对称 INT8 激活、UQ4.28 combined scale、signed int64 Q28 与 bias 规则。
+4. 建立独立硬件调度、DDR3 流式读取与结果回写，完成固定真实输入、随机/边界、PDS 全流程、多角时序、JTAG SRAM 和真实上板逐位压力测试。
+5. gate/up 两路全部通过前不得进入 SiLU(gate) 或 `SiLU(gate) × up`。

@@ -500,3 +500,15 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 新增单元测试 5/5 PASS；完整 `model_tools` 回归 105/105 PASS；
 - 软件完整链、8960 B 载荷、signed RNE 正负 half-way tie、`INT64_MIN/MAX`、重标定和最终残差正负饱和、随机/边界压力 1000/1000 PASS，seed=`20260806`；
 - 固定清单：`attention_residual_f6_reference.json`。
+
+
+2026-07-24 建立 G1 layer0 `post_attention_layernorm` 连贯软件参考：
+
+- 输入直接复用 F6 四组已经真实上板逐位通过的完整 layer0 Attention 子层 `[896]` signed Q6.10 输出，query/count 为 `0/1`、`1/2`、`5/6`、`15/16`；
+- 真实张量为 `model.layers.0.post_attention_layernorm.weight`，shape=`[896]`，源类型 BF16，在 `.p50` 中连续 FP16 存储 1792 B；
+- 数值规则严格复用 E1：input/gamma/output 为 signed Q6.10，平方和 40 位，mean/epsilon 为 Q12.20，`epsilon_q20=1`，LUT256 rsqrt 为 UQ12.20，所有除法和右移采用 RNE，输出显式饱和；
+- 四组输出 SHA256 为 `93d2d3ee866a7923e3ce9d450ae5d6e43a05c50daeaa952cae052c4584891f80`、`0ef1296dde8e999f6ac707725da227bd8f87b5da848a7a81113f422a03d0cbdf`、`40965e0cb4d96cf8de644d4b7081df5acef34d6c24ec8cd6d448fac4943b83aa`、`fa574c09c76580173c62d59bd5a682cd35bb97b70d25459dcf0ac6e3808e48b1`；
+- 新增单元测试 5/5 PASS；完整 `model_tools` 回归 110/110 PASS；
+- 固定清单、4608 B 上传载荷往返和随机/边界压力 1000/1000 PASS，seed=`20260807`；覆盖全零、`INT16_MIN/MAX`、常量、稀疏、小幅值和完整 int16 随机输入；
+- 固定真实 Attention 输入中 LUT256 相对精确 rsqrt 路径最大差值为 2 Q10 LSB；完整 int16 极端软件压力中的最大差值为 8 Q10 LSB；
+- 固定清单：`post_attention_layernorm_g1_reference.json`；上位机：`../tools/pangu_post_attention_layernorm_host.py`。

@@ -603,7 +603,7 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 
 ### G1 MLP
 
-- [ ] MLP 输入 `post_attention_layernorm`
+- [x] MLP 输入 `post_attention_layernorm`
 - [ ] gate projection
 - [ ] up projection
 - [ ] SiLU(gate)
@@ -611,6 +611,17 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 - [ ] down projection
 - [ ] 残差连接
 - [ ] 完整 MLP 与软件参考比较
+
+G1 MLP 输入 `post_attention_layernorm` 验证证据（2026-07-24）：
+
+- 新增独立 `post_attention_layernorm_g1` 工程，输入直接复用 F6 已真实上板逐位通过的完整 Attention 子层 `[896]` signed Q6.10 输出；真实 gamma 为 `model.layers.0.post_attention_layernorm.weight`，shape=`[896]`、连续 FP16，epsilon=`1e-6`；
+- 定点规则严格复用但隔离 E1：input/gamma/output 为 signed Q6.10，平方和 40 位，均值与 epsilon 为 Q12.20，LUT256 rsqrt 为 UQ12.20，除法与右移采用 RNE，输出显式饱和；未修改或覆盖 E1、F6 已验证 RTL、PDS 工程和位流；
+- 四组连贯固定 query/count=`0/1、1/2、5/6、15/16` 的输入 SHA256 与 F6 最终输出完全一致；G1 输出 SHA256 分别为 `93d2d3ee866a7923e3ce9d450ae5d6e43a05c50daeaa952cae052c4584891f80`、`0ef1296dde8e999f6ac707725da227bd8f87b5da848a7a81113f422a03d0cbdf`、`40965e0cb4d96cf8de644d4b7081df5acef34d6c24ec8cd6d448fac4943b83aa`、`fa574c09c76580173c62d59bd5a682cd35bb97b70d25459dcf0ac6e3808e48b1`；四组 896 个输出均真实上板逐位一致；
+- 新增单元测试 5/5 PASS，完整 `model_tools` 回归 110/110 PASS；软件固定清单、4608 B 载荷往返和随机/边界压力 1000/1000 PASS，seed=`20260807`，覆盖全零、`INT16_MIN/MAX`、常量、稀疏、小幅值和完整 int16 随机输入；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，最终未布线网络为 0；资源为 8801 LUT、7051 FF、70 个 distributed RAM、12 DRM、9 APM、79 IO；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.411 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；快角 setup WNS=`+2.857 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复和移除无违例；
+- 位流：`post_attention_layernorm_g1/pnr/generate_bitstream/rmsnorm_k896_top.sbit`，大小 2101696 B，SHA256=`b8c87ee10edf435617ab110cfdf0cf2a8d3c3ad3d3b91748c80ef04363305ec2`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash，DDR3 初始化成功；真实 FPGA 随机/边界 300/300 PASS，seed=`20260807`，耗时 182.74 秒。
 
 ### G2 单个 Transformer Block
 
@@ -820,6 +831,13 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 | `attention_residual_f6/pnr/build_attention_residual.tcl` | F6 完整 Attention 残差独立 PDS 全流程构建脚本 |
 | `attention_residual_f6/README.md` | F6 连贯软件链、定点边界、协议、时序、位流和真实上板证据 |
 | `tools/pangu_attention_residual_host.py` | F6 完整 Attention 软件自检、固定和随机/边界上板逐位比较工具 |
+| `model_tools/post_attention_layernorm_reference.py` | G1 连贯 Attention 输出、真实 post-attention gamma、LUT256 RMSNorm 和载荷金标准 |
+| `model_tools/post_attention_layernorm_g1_reference.json` | G1 四组真实 MLP 输入、归一化输出和载荷 SHA256 清单 |
+| `model_tools/test_post_attention_layernorm_reference.py` | G1 张量、Q10 往返、载荷、连贯固定输入和 1000 轮随机/边界测试 |
+| `post_attention_layernorm_g1/pnr/build_post_attention_layernorm.tcl` | G1 隔离复用 E1 RTL 的独立 PDS 全流程构建脚本 |
+| `post_attention_layernorm_g1/pnr/program_sram.tcl` | G1 独立位流仅下载 FPGA 易失性 SRAM 的脚本 |
+| `post_attention_layernorm_g1/README.md` | G1 复用边界、定点规则、固定输入、时序、位流和真实上板证据 |
+| `tools/pangu_post_attention_layernorm_host.py` | G1 软件自检、四组真实固定和随机/边界上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -837,10 +855,10 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 G1 MLP 的唯一下一小步：先完成 layer0 `post_attention_layernorm`，把已经真实上板逐位通过的
-完整 Attention 子层 `[896]` signed Q6.10 输出作为输入，读取真实
-`model.layers.0.post_attention_layernorm.weight`，复用但隔离已验证 RMSNorm 定点能力，建立连贯
-MLP 输入软件参考和独立硬件闭环。必须明确输入/输出 Q6.10、epsilon、LUT rsqrt、RNE 和饱和规则，
-验收包含真实固定 Attention 输出、随机/边界、PDS 全流程、多角时序、JTAG SRAM 和逐位压力测试。
-该归一化通过前不得进入 gate/up projection。
+G1 MLP 的唯一下一任务：完成 layer0 `gate_proj` 与 `up_proj` 的真实双投影闭环。两路都必须直接消费
+已经真实上板逐位通过的 `post_attention_layernorm` `[896]` signed Q6.10 输出；真实权重均为
+`[4864,896]`、group size 64 的对称 groupwise INT4。建立同一输入来源的双投影软件参考、完整载荷、
+独立硬件调度和流式结果回写，明确激活 INT8、UQ4.28 combined scale、signed int64 Q28、无/有 bias
+规则，并完成固定真实输入、随机/边界、PDS 全流程、多角时序、JTAG SRAM 和逐位压力测试。
+gate/up 两路全部通过前不得进入 SiLU(gate) 或 `SiLU(gate) × up`。
 ```
