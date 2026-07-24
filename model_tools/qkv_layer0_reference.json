@@ -1,0 +1,256 @@
+{
+  "format_version": 1,
+  "layer": 0,
+  "model_layout": {
+    "hidden_size": 896,
+    "num_attention_heads": 14,
+    "num_key_value_heads": 2,
+    "head_dim": 64,
+    "q_shape": [
+      14,
+      64
+    ],
+    "k_shape": [
+      2,
+      64
+    ],
+    "v_shape": [
+      2,
+      64
+    ],
+    "flat_order": "head_major_contiguous"
+  },
+  "activation": {
+    "generator": "32-bit LCG",
+    "seed": 20260723,
+    "shared_by_qkv": true,
+    "int8_sha256": "2cd260ee0cfac02fb03f64e28eedeb2a929b868a028d61f4c4f0842edbcf5d76"
+  },
+  "projections": {
+    "q": {
+      "projection": "q",
+      "weight_tensor": "model.layers.0.self_attn.q_proj.weight",
+      "bias_tensor": "model.layers.0.self_attn.q_proj.bias",
+      "shape": {
+        "M": 896,
+        "K": 896,
+        "group_size": 64,
+        "groups_per_row": 14,
+        "heads": 14,
+        "head_dim": 64,
+        "layout": "head_major_contiguous"
+      },
+      "activation": {
+        "format": "symmetric_per_vector_int8",
+        "scale": 0.0314826064222441
+      },
+      "upload_layout_bytes": {
+        "activation_int8": 896,
+        "packed_weight_int4": 401408,
+        "combined_scale_uq4_28_padded": 57344,
+        "bias_q28_padded": 28672,
+        "total": 488320
+      },
+      "expected": {
+        "first_8_output_fixed_q28": [
+          207253689,
+          -173360554,
+          287606739,
+          -223225713,
+          -4687768431,
+          104298201,
+          301392249,
+          13611309
+        ],
+        "last_8_output_fixed_q28": [
+          1043114578,
+          -2138877247,
+          -1060954045,
+          241305015,
+          831408625,
+          67617978,
+          249103231,
+          582822115
+        ],
+        "head0_first_8_fixed_q28": [
+          207253689,
+          -173360554,
+          287606739,
+          -223225713,
+          -4687768431,
+          104298201,
+          301392249,
+          13611309
+        ],
+        "last_head_last_8_fixed_q28": [
+          1043114578,
+          -2138877247,
+          -1060954045,
+          241305015,
+          831408625,
+          67617978,
+          249103231,
+          582822115
+        ]
+      },
+      "sha256": {
+        "activation_int8": "2cd260ee0cfac02fb03f64e28eedeb2a929b868a028d61f4c4f0842edbcf5d76",
+        "packed_weight_int4": "aed36ffee9a996406ef5efac1e0ad53d251b0b46328bfb8914a13c43f2f17e64",
+        "combined_scale_uq4_28": "5b860621855e6c48eeb4ebc0bea6ae7dd9fd42d31d3f4011238e8a8b37e970b8",
+        "bias_q28": "0d1d1f3c82b40383bd8314af2532bfe7f64e23f8cb2dcee3f59154bcb35a23e3",
+        "output_fixed_q28": "ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0",
+        "upload_payload": "71893f988816fcdcf1a58a2c7b453a4fa544224db7cf47c41d39d9aa906251aa"
+      }
+    },
+    "k": {
+      "projection": "k",
+      "weight_tensor": "model.layers.0.self_attn.k_proj.weight",
+      "bias_tensor": "model.layers.0.self_attn.k_proj.bias",
+      "shape": {
+        "M": 128,
+        "K": 896,
+        "group_size": 64,
+        "groups_per_row": 14,
+        "heads": 2,
+        "head_dim": 64,
+        "layout": "head_major_contiguous"
+      },
+      "activation": {
+        "format": "symmetric_per_vector_int8",
+        "scale": 0.0314826064222441
+      },
+      "upload_layout_bytes": {
+        "activation_int8": 896,
+        "packed_weight_int4": 57344,
+        "combined_scale_uq4_28_padded": 8192,
+        "bias_q28_padded": 4096,
+        "total": 70528
+      },
+      "expected": {
+        "first_8_output_fixed_q28": [
+          -1352895551,
+          -1666056552,
+          -3170882584,
+          492614199,
+          -808869512,
+          2409646799,
+          2105947821,
+          -763045456
+        ],
+        "last_8_output_fixed_q28": [
+          424184723,
+          -2665496837,
+          -4791616945,
+          -10655045379,
+          15883956679,
+          23752421929,
+          30497706868,
+          -31144137029
+        ],
+        "head0_first_8_fixed_q28": [
+          -1352895551,
+          -1666056552,
+          -3170882584,
+          492614199,
+          -808869512,
+          2409646799,
+          2105947821,
+          -763045456
+        ],
+        "last_head_last_8_fixed_q28": [
+          424184723,
+          -2665496837,
+          -4791616945,
+          -10655045379,
+          15883956679,
+          23752421929,
+          30497706868,
+          -31144137029
+        ]
+      },
+      "sha256": {
+        "activation_int8": "2cd260ee0cfac02fb03f64e28eedeb2a929b868a028d61f4c4f0842edbcf5d76",
+        "packed_weight_int4": "e1be12f6d9e6b87063f2998f864df6b4cf4231db7230b82f9acbaf63aadf93d0",
+        "combined_scale_uq4_28": "c0cfd2d6238eeb166786d850a0df9522fa34c4c429a8bb4b21928a8a8e6de8f3",
+        "bias_q28": "df6f43e149a5e3a76a1f1880a4447b866e9c7032637b989aaa2004c34cbd005f",
+        "output_fixed_q28": "20728d329c32c722b0194032897bc3cf9a3a31323317e389d8fd7b6f78745474",
+        "upload_payload": "c2b265592a6f5cdf4caad673e1322f9e21bbdb53752b737c1d8833af29bc6074"
+      }
+    },
+    "v": {
+      "projection": "v",
+      "weight_tensor": "model.layers.0.self_attn.v_proj.weight",
+      "bias_tensor": "model.layers.0.self_attn.v_proj.bias",
+      "shape": {
+        "M": 128,
+        "K": 896,
+        "group_size": 64,
+        "groups_per_row": 14,
+        "heads": 2,
+        "head_dim": 64,
+        "layout": "head_major_contiguous"
+      },
+      "activation": {
+        "format": "symmetric_per_vector_int8",
+        "scale": 0.0314826064222441
+      },
+      "upload_layout_bytes": {
+        "activation_int8": 896,
+        "packed_weight_int4": 57344,
+        "combined_scale_uq4_28_padded": 8192,
+        "bias_q28_padded": 4096,
+        "total": 70528
+      },
+      "expected": {
+        "first_8_output_fixed_q28": [
+          61693339,
+          -3586350,
+          -155647370,
+          -109848146,
+          11029025,
+          101104329,
+          -43721742,
+          -4058723
+        ],
+        "last_8_output_fixed_q28": [
+          -486195786,
+          217623324,
+          351200711,
+          350930800,
+          345187799,
+          160709156,
+          19744210,
+          -124189091
+        ],
+        "head0_first_8_fixed_q28": [
+          61693339,
+          -3586350,
+          -155647370,
+          -109848146,
+          11029025,
+          101104329,
+          -43721742,
+          -4058723
+        ],
+        "last_head_last_8_fixed_q28": [
+          -486195786,
+          217623324,
+          351200711,
+          350930800,
+          345187799,
+          160709156,
+          19744210,
+          -124189091
+        ]
+      },
+      "sha256": {
+        "activation_int8": "2cd260ee0cfac02fb03f64e28eedeb2a929b868a028d61f4c4f0842edbcf5d76",
+        "packed_weight_int4": "7f1a1c0d39a0466dc51a7ce1fa26790c95aa80c495eb408fee12e75a1b00e811",
+        "combined_scale_uq4_28": "8256eba07cb0becb6c5e0ecd0bab9e2e753abc37bf1cb591255a29da5a9960c5",
+        "bias_q28": "c669e20593ae59903da263fe2a9598d545a3a46dc53fac2e892e74d3f00f568a",
+        "output_fixed_q28": "162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168",
+        "upload_payload": "5aaf7b23444c8096b23184248fd028e09651470e3d90a78cd1c66e8bef3fa221"
+      }
+    }
+  }
+}

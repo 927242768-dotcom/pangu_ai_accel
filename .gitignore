@@ -75,3 +75,7 @@ stdout.log
 
 # Temporary screenshots made during board programming
 **/cdt_assign_*.png
+
+# Rejected QKV timing-seed experiments; keep only the passing seed5/11 flow
+qkv_linear_layer0/pnr_seed17/
+qkv_linear_layer0/pnr/reroute_seed5.tcl

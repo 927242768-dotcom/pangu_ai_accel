@@ -102,6 +102,8 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
 | `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
+| `qkv_linear_reference.py` | F1 layer0 Q/K/V 统一 P50 加载、Q28 重算、动态载荷和 GQA head-major 布局参考 |
+| `qkv_layer0_reference.json` | F1 Q/K/V 固定输出、上传布局、head shape 和关键数组 SHA256 清单 |
 | `rmsnorm_fixed_reference.py` | layer0 input_layernorm 的 Q6.10、Q12.20、LUT/NR rsqrt 与硬件等价金标准 |
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
@@ -110,6 +112,7 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `embedding_k896_reference.json` | E3 固定 Token 的地址、载荷、输出范围和 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
 | `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
+| `test_qkv_linear_reference.py` | F1 Q/K/V 形状、共享 hidden state、GQA 布局、载荷和真实 P50 固定清单测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
@@ -187,6 +190,15 @@ python tools\pangu_gemv_qproj_full_host.py selftest --rounds 1000 --seed 2026072
 ```
 
 该工具从真实镜像一次性提取完整权重、FP16 scale 和 bias，之后复用这些模型数据生成不同激活的逐行 signed int64 Q28 金标准，并验证 488320 B 上传载荷的打包、补齐和往返一致性。
+
+生成并验证 F1 layer0 Q/K/V 统一固定清单、GQA head 布局和 1000 轮随机 hidden state：
+
+```bat
+python tools\pangu_qkv_linear_host.py selftest ^
+  --projection all --rounds 1000 --seed 20260729
+```
+
+Q/K/V 共用同一逐向量对称 INT8 hidden state和 Q28 定义；输出分别还原为 `[14,64]`、`[2,64]`、`[2,64]`。载荷大小为 Q 488320 B、K/V 各 70528 B。完整协议、DDR3 地址、时序和真实上板证据见 `qkv_linear_layer0/README.md`。
 
 生成 layer0 `input_layernorm` K=896 定点参考并查看 LUT/NR 比较：
 
@@ -368,3 +380,14 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 真实随机 Token 软件/载荷压力 1000/1000 PASS，seed=`20260728`；
 - 最大 Q6.10 量化误差 `0.00048828125`，未发生输出饱和；
 - 固定清单：`embedding_k896_reference.json`。
+
+2026-07-24 建立 F1 layer0 真实 Q/K/V 统一软件参考：
+
+- 真实权重形状：Q=`[896,896]`、K/V=`[128,896]`，均为 group size 64；
+- Q/K/V 共用同一逐向量对称 INT8 hidden state、UQ4.28 combined scale 和 signed int64 Q28 输出；
+- 输出按 head-major 连续排列：Q=`[14,64]`、K/V=`[2,64]`，`head_dim=64`；
+- Q/K/V 载荷大小分别为 488320 B、70528 B、70528 B，packed INT4、scale/bias 补齐和往返全部验证；
+- 固定 Q/K/V 输出 SHA256 分别为 `ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`、`20728d329c32c722b0194032897bc3cf9a3a31323317e389d8fd7b6f78745474`、`162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168`；
+- F1 新增单元测试 3/3 PASS；完整 `model_tools` 回归 48/48 PASS；
+- QKV 软件随机 hidden state 1000/1000 PASS，seed=`20260729`；
+- 固定清单：`qkv_layer0_reference.json`。

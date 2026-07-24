@@ -16,10 +16,11 @@
 10. [`rmsnorm_k896/README.md`](rmsnorm_k896/README.md)：已验证的 layer0 input_layernorm K=896 定点 RMSNorm 闭环。
 11. [`elementwise_k896/README.md`](elementwise_k896/README.md)：已验证的 K=896 残差、缩放、元素乘法和 PWL64 SiLU 闭环。
 12. [`embedding_k896/README.md`](embedding_k896/README.md)：已验证的真实 tied Embedding Token 行地址、INT4/UQ4.28 到 Q6.10 闭环。
+13. [`qkv_linear_layer0/README.md`](qkv_linear_layer0/README.md)：已验证的真实 layer0 Q/K/V、GQA head-major 布局和统一 Q28 闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm 和元素级非线性算子的多级计算闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding 和完整 Q/K/V 的多级计算闭环：
 
 ```text
 长度16单点积：
@@ -51,14 +52,15 @@ E2 元素级运算现已完成。独立工程 `elementwise_k896` 支持 signed Q
 
 E3 Embedding/查表现已完成。独立工程 `embedding_k896` 对真实 tied `model.embed_tokens.weight`（shape `[151936,896]`、group size 64）实现 Token ID 到 512 B DDR3 行槽映射，读取 448 B packed signed INT4 和 14 个 UQ4.28 scale，逐元素 RNE 转为 signed Q6.10。四个固定 Token `[0,1,2026,151935]` 的 896 个输出均与 Python 逐位一致；软件/载荷随机 `1000/1000 PASS`，真实上板随机 `300/300 PASS`。PDS 全流程和所有角时序通过，慢角 100 MHz WNS=`+0.679 ns`、TNS=0；位流 SHA256=`cd0e138e494875035cf5c66d76eaf250729625c172bf51c935b831d31c45c0fa`。
 
+F1 Q/K/V 线性层现已完成。独立工程 `qkv_linear_layer0` 统一运行真实 layer0 `q_proj=[896,896]`、`k_proj=[128,896]`、`v_proj=[128,896]`，共用逐向量对称 INT8 hidden state、UQ4.28 combined scale 和 signed int64 Q28 数据通路；输出按 Q=`[14,64]`、K/V=`[2,64]` 的 head-major GQA 布局排列。固定 Q/K/V 全输出均与 Python 逐位一致；完整软件回归 `48/48 PASS`，QKV 软件随机 `1000/1000 PASS`，真实上板随机完整 Q+K+V `3/3 PASS`。seed5/11 PDS 全流程和所有角时序通过，慢角 setup WNS=`+0.363 ns`、TNS=0、hold WHS=`+0.169 ns`、THS=0；位流 SHA256=`e3a4b6849a5716f38d6bdd3fbd039d46f2d350a32a0417ee347462d1a8f96e26`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 F1 Q/K/V 线性层：真实 layer0 张量为 q_proj=[896,896]、k_proj=[128,896]、
-v_proj=[128,896]，均为 INT4 group size 64；模型采用 14 个 Q heads、2 个 KV heads、
-head_dim=64 的 GQA。复用已验证完整 q_proj 数据通路，先建立 K/V 的真实 Q28 软件参考、
-bias/scale 载荷和 Q/K/V head 布局，再新建可按投影类型运行的独立 QKV 工程，完成固定与
-随机 hidden state、PDS、多角时序和真实上板验证。不得覆盖任何已有验证工程和位流。
+进入 F2 RoPE：在 F1 已验证的 Q=[14,64]、K=[2,64] head-major Q28 输出基础上，
+确认 rotary_dim、rope_theta、位置索引和偶奇维配对规则，建立真实 Q/K 软件参考与固定清单；
+再新建独立 RoPE 定点工程，完成 sin/cos 表、位置递增、Q/K 旋转、格式转换、误差验证、
+软件压力、PDS、多角时序以及真实上板固定和随机位置测试。不得覆盖已有验证工程和位流。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

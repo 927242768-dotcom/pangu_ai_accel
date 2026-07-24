@@ -426,11 +426,25 @@ E3 验证证据（2026-07-24）：
 
 ### F1 Q/K/V 线性层
 
-- [ ] 用通用 GEMV 实现 Q 投影
-- [ ] 用通用 GEMV 实现 K 投影
-- [ ] 用通用 GEMV 实现 V 投影
-- [ ] 支持多头/分组查询注意力的张量布局
-- [ ] 与软件参考逐元素比较
+- [x] 用通用 GEMV 实现 Q 投影
+- [x] 用通用 GEMV 实现 K 投影
+- [x] 用通用 GEMV 实现 V 投影
+- [x] 支持多头/分组查询注意力的张量布局
+- [x] 与软件参考逐元素比较
+
+F1 验证证据（2026-07-24）：
+
+- 新增独立 `qkv_linear_layer0` 工程，真实运行 layer0 `q_proj=[896,896]`、`k_proj=[128,896]`、`v_proj=[128,896]`，均为 INT4 group size 64；
+- Q/K/V 共用同一逐向量对称 INT8 hidden state、UQ4.28 combined scale、signed int64 Q28 输出定义；
+- GQA 输出按 head-major 连续排列，Q=`[14,64]`，K/V=`[2,64]`，`head_dim=64`；
+- 固定 Q/K/V 全输出真实上板逐位一致，输出 SHA256 分别为 `ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`、`20728d329c32c722b0194032897bc3cf9a3a31323317e389d8fd7b6f78745474`、`162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168`；
+- 完整 `model_tools` 回归 48/48 PASS，QKV 软件随机 hidden state 1000/1000 PASS，seed=`20260729`；
+- 真实 FPGA 随机完整 Q+K+V 回归 3/3 PASS，seed=`20260729..20260731`；
+- seed5/11 PDS 编译、综合、Device Map、布局布线、时序分析和位流生成成功，最终未布线网络为 0；
+- 资源：8503 LUT、7641 FF、326 个 distributed RAM、4 DRM、12 APM；
+- 多角时序 `All Constraints Met`：慢角 setup WNS=`+0.363 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；快角 setup WNS=`+2.985 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`qkv_linear_layer0/pnr_seed5/generate_bitstream/qkv_linear_top.sbit`，SHA256=`e3a4b6849a5716f38d6bdd3fbd039d46f2d350a32a0417ee347462d1a8f96e26`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K QKV LINEAR V1`，DDR3 初始化成功。
 
 ### F2 RoPE
 
@@ -629,6 +643,14 @@ E3 验证证据（2026-07-24）：
 | `embedding_k896/pnr/build_embedding_k896.tcl` | E3 独立 PDS 全流程构建脚本 |
 | `embedding_k896/README.md` | E3 格式、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_embedding_k896_host.py` | E3 软件自检、固定边界 Token 和随机 Token 上板比较工具 |
+| `model_tools/qkv_linear_reference.py` | F1 真实 Q/K/V 统一加载、Q28 金标准、载荷和 GQA head-major 布局参考 |
+| `model_tools/qkv_layer0_reference.json` | F1 Q/K/V 固定输出、载荷布局和关键数组 SHA256 清单 |
+| `model_tools/test_qkv_linear_reference.py` | F1 投影形状、共享 hidden state、head 布局、载荷和真实 P50 集成测试 |
+| `qkv_linear_layer0/rtl/qkv_linear_core.v` | F1 Q/K/V 共用的 K=896、group size 64 单行 Q28 GEMV 核心 |
+| `qkv_linear_layer0/rtl/qkv_linear_ctrl.v` | F1 投影选择、动态 M=896/128、UART、DDR3 行调度和结果回读控制器 |
+| `qkv_linear_layer0/pnr_seed5/run_seed5.tcl` | F1 时序全通过的 seed5/11 独立 PDS 全流程构建脚本 |
+| `qkv_linear_layer0/README.md` | F1 量化定义、协议、GQA 布局、时序、位流和真实上板证据 |
+| `tools/pangu_qkv_linear_host.py` | F1 Q/K/V 软件自检、固定和随机 hidden state 上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -646,10 +668,9 @@ E3 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 F1 Q/K/V 线性层：围绕 layer0 真实张量建立统一软件参考和独立硬件闭环。
-已确认 q_proj=[896,896]、k_proj=[128,896]、v_proj=[128,896]，均为 group size 64 的
-INT4 分组对称量化；模型为 14 个 Q heads、2 个 KV heads、head_dim=64 的 GQA 布局。
-先复用已验证 q_proj 完整层数据通路，补齐 K/V 的真实权重、scale、bias、Q28 金标准和
-输出 head 布局；再建立可按投影类型运行的独立 QKV 工程，验证 Q/K/V 全输出、GQA 张量
-排列、固定与随机真实 hidden state、PDS、多角时序和真实上板。不得覆盖任何已有验证工程和位流。
+进入 F2 RoPE：基于 F1 已验证的 Q=[14,64]、K=[2,64] head-major Q28 输出，先确认
+Qwen2.5-0.5B 的 rotary_dim、rope_theta、位置索引和偶奇维配对规则，建立真实 layer0 Q/K
+软件参考与固定清单。随后设计独立 RoPE 定点工程，完成 sin/cos 表生成或加载、位置索引递增、
+Q/K 偶数/奇数维旋转、定点格式转换和误差界验证，并执行软件压力、PDS、多角时序、真实上板
+固定与随机位置测试。不得覆盖 F1 及更早阶段的验证工程和位流。
 ```

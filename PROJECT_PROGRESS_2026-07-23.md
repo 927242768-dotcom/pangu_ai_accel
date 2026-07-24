@@ -690,9 +690,60 @@ row_base_ctrl_addr = token_id << 7
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
 - 固件：`PANGU50K EMBEDDING K896 V1`，DDR3 初始化成功。
 
-## 十五、当前项目状态
+## 十五、2026-07-24 新完成：F1 layer0 真实 Q/K/V 线性层
 
-当前已经完成九级真实闭环：
+新增统一软件参考、固定清单、独立硬件工程和上位机：
+
+```text
+model_tools/qkv_linear_reference.py
+model_tools/test_qkv_linear_reference.py
+model_tools/qkv_layer0_reference.json
+qkv_linear_layer0/rtl/int8_dot16_pipe.v
+qkv_linear_layer0/rtl/qkv_linear_core.v
+qkv_linear_layer0/rtl/qkv_linear_ctrl.v
+qkv_linear_layer0/rtl/qkv_linear_top.v
+qkv_linear_layer0/pnr/build_qkv_linear.tcl
+qkv_linear_layer0/pnr_seed5/run_seed5.tcl
+qkv_linear_layer0/pnr_seed5/program_sram.tcl
+qkv_linear_layer0/README.md
+tools/pangu_qkv_linear_host.py
+```
+
+真实对象和 GQA 布局：
+
+```text
+q_proj.weight = [896,896] -> 14 Q heads × 64
+k_proj.weight = [128,896] ->  2 K heads × 64
+v_proj.weight = [128,896] ->  2 V heads × 64
+```
+
+三种投影均使用 group size 64 的真实 signed INT4 权重、同一逐向量对称 INT8 hidden state、UQ4.28 combined scale、signed Q28 bias 和 signed int64 Q28 输出。平坦输出按 head-major 连续排列，可无损还原为 Q=`[14,64]`、K/V=`[2,64]`。
+
+载荷随投影动态切换：Q 为 488320 B，K/V 各为 70528 B；硬件命令 `Q/K/V` 选择投影，输出行数和结果回读长度分别为 896/128/128。DDR3 地址布局复用已验证完整 q_proj 工程，但新建独立目录和位流，不覆盖任何既有成果。
+
+验证结果：
+
+- 新增 F1 单元测试 3/3 PASS；完整 `model_tools` 回归 48/48 PASS；
+- 固定清单、packed INT4、补齐 scale/bias、载荷往返、独立 Q28 重算和共享 hidden state 检查全部通过；
+- QKV 软件随机 hidden state 压力 1000/1000 PASS，seed=`20260729`；
+- 固定 Q 全 896 行真实上板逐位一致，输出 SHA256=`ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`；
+- 固定 K 全 128 行真实上板逐位一致，输出 SHA256=`20728d329c32c722b0194032897bc3cf9a3a31323317e389d8fd7b6f78745474`；
+- 固定 V 全 128 行真实上板逐位一致，输出 SHA256=`162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168`；
+- 固定输出 head shape 分别为 `(14,64)`、`(2,64)`、`(2,64)`；
+- 真实随机完整 Q+K+V 上板回归 3/3 PASS，seed=`20260729..20260731`，约 166.72 秒；
+- 默认种子和 seed17/29 均只在 DDR3 IP 内部出现极小快角 hold 违例，未作为有效位流；最终 seed5/11 全约束通过；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功，最终未布线网络为 0；
+- 资源：8503 LUT、7641 FF、326 个 distributed RAM、4 DRM、12 APM；
+- 多角时序：`All Constraints Met`；慢角 setup WNS=`+0.363 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；快角 setup WNS=`+2.985 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`qkv_linear_layer0\pnr_seed5\generate_bitstream\qkv_linear_top.sbit`，大小 2101696 B；
+- 位流 SHA256：`e3a4b6849a5716f38d6bdd3fbd039d46f2d350a32a0417ee347462d1a8f96e26`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K QKV LINEAR V1`，DDR3 初始化成功。
+
+## 十六、当前项目状态
+
+当前已经完成十级真实闭环：
 
 ```text
 长度16单点积
@@ -704,35 +755,35 @@ row_base_ctrl_addr = token_id << 7
 → 真实 layer0 input_layernorm K896 定点 RMSNorm 闭环
 → K896 残差、缩放、元素乘法和 PWL64 SiLU 闭环
 → 真实 tied Embedding Token 行查表与 Q6.10 格式转换闭环
+→ 真实 layer0 Q/K/V 与 14Q/2KV GQA head-major 布局闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、RMSNorm 平方和/均值/LUT rsqrt、元素级 RNE/饱和/PWL 非线性、Token 稀疏行地址和 Embedding 格式转换、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、动态 896/128 行调度、GQA head 布局、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 Linear、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成完整 Q/K/V、RoPE、Attention、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 RoPE、KV Cache、Attention、MLP、Transformer Block 和文本生成。
 
-## 十六、下一阶段路线
+## 十七、下一阶段路线
 
-### 当前唯一下一步：F1 Q/K/V 线性层
+### 当前唯一下一步：F2 RoPE
 
-1. 基于 layer0 真实 `q_proj/k_proj/v_proj` 建立统一软件参考；真实形状分别为 `[896,896]`、`[128,896]`、`[128,896]`，均为 INT4 group size 64。
-2. 复用已验证完整 q_proj 的逐组 UQ4.28、signed INT64 Q28 数据通路，补齐 K/V 权重、scale、bias 和完整输出金标准。
-3. 明确 Qwen2.5-0.5B 的 GQA 输出布局：14 个 Q heads、2 个 KV heads、`head_dim=64`。
-4. 新建可按投影类型运行的独立 QKV 工程，不覆盖任何已有验证工程和位流。
-5. 完成 Q/K/V 全输出、head 排列、固定与随机真实 hidden state 的 Python 逐元素比较。
-6. 完成 PDS 全流程、多角时序、真实上板和随机压力验证。
+1. 基于 F1 已验证的 Q=`[14,64]`、K=`[2,64]` head-major Q28 输出，确认模型的 `rotary_dim`、`rope_theta`、位置索引和偶奇维配对规则。
+2. 建立真实 layer0 Q/K 的 RoPE 软件参考、定点格式、固定位置清单和可量化误差界。
+3. 新建独立 RoPE 工程，支持 sin/cos 表生成或加载、位置索引递增以及 Q/K 偶数/奇数维旋转。
+4. 完成固定与随机 Q/K、多个位置索引的 Python 逐元素比较。
+5. 完成软件压力、PDS 全流程、多角时序、真实上板和随机位置压力验证。
+6. 不覆盖 F1 及任何更早阶段的验证工程和位流。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. Q/K/V 线性层。
-2. RoPE。
-3. KV Cache。
-4. Attention Score 与 Softmax。
-5. Attention 输出。
-6. MLP。
-7. Transformer Block。
-8. 完整模型权重加载与分层调度。
-9. tokenizer、采样与文本推理验证。
+1. RoPE。
+2. KV Cache。
+3. Attention Score 与 Softmax。
+4. Attention 输出。
+5. MLP。
+6. Transformer Block。
+7. 完整模型权重加载与分层调度。
+8. tokenizer、采样与文本推理验证。
 
 每一步都应保留“FPGA 结果与 Python 参考逐元素自动比较”的闭环，避免直接跳到完整模型后难以定位错误。
