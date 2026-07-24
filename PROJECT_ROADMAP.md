@@ -471,11 +471,29 @@ F2 验证证据（2026-07-24）：
 
 ### F3 KV Cache
 
-- [ ] 定义 DDR3 中每层 K/V Cache 地址布局
-- [ ] 当前 token 的 K/V 写入
-- [ ] 历史 token 的 K/V 顺序读取
-- [ ] 支持上下文长度边界检查
-- [ ] 防止层间和 token 间地址覆盖
+- [x] 定义 DDR3 中每层 K/V Cache 地址布局
+- [x] 当前 token 的 K/V 写入
+- [x] 历史 token 的 K/V 顺序读取
+- [x] 支持上下文长度边界检查
+- [x] 防止层间和 token 间地址覆盖
+
+F3 验证证据（2026-07-24）：
+
+- 新增独立 `kv_cache_f3` 工程，未覆盖 F2 或任何更早阶段的工程和位流；
+- 容量结论：K/V 各为 `[2,64]` signed int64 Q28，每 token 共 2048 B；完整 32768 positions 需要 1792 MiB，超过 1 GiB，因此硬件上下文上限确定为 16384；
+- DDR3 低端 128 MiB 保留，高端 896 MiB 为 KV Cache；每层固定 32 MiB，28 层恰好结束于 1 GiB；低端 128 MiB 无法常驻约 251.63 MiB 全模型，后续完整集成需流式/分层加载权重或重新平衡上下文与内存分区；
+- Controller 地址公式：`K=0x02000000 + layer*0x00800000 + position*0x200`，`V=K+0x100`；
+- 支持当前 token 写入后 position 自动递增，以及一次连续 `1..16` token 的历史 K/V 分段 burst 顺序读取；
+- F3 新增单元测试 9/9 PASS，完整 `model_tools` 回归 64/64 PASS；软件地址、边界和载荷随机压力 1000/1000 PASS，seed=`20260801`；
+- 真实固定 K/V：layer0 position `0..1`、layer13 position `2026`、layer27 position `16383` 全部逐位一致；固定测试约 1.66 秒；
+- layer27 最后槽严格结束于 1 GiB，下一 token 写入被错误码 `0x05` 正确拒绝；
+- layer3/layer17 在相同 position `4096` 写入不同完整 K/V 后跨配置回读均逐位一致，证明层间不覆盖；
+- 真实 FPGA 随机层、随机 position、每批 `1..16` 连续 token 回归 300/300 token PASS，seed=`20260801`，约 124.41 秒；
+- PDS 编译、综合、Device Map、布局布线、时序和位流生成成功，最终未布线网络为 0；
+- 资源：7572 LUT、9884 FF、70 个 distributed RAM、0 DRM、0 APM；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+1.781 ns`、TNS=0，hold WHS=`+0.171 ns`、THS=0；快角 setup WNS=`+4.142 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`kv_cache_f3/pnr/generate_bitstream/kv_cache_top.sbit`，大小 2101696 B，SHA256=`11a0240a2ee42f0c92b6a5919f4a4b71ceb7bb806b55f1810b4ef3ff88d23216`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K KV CACHE V1`，DDR3 初始化成功。
 
 ### F4 Attention Score
 
@@ -675,6 +693,13 @@ F2 验证证据（2026-07-24）：
 | `rope_qk_layer0/pnr/build_rope_qk.tcl` | F2 独立 PDS 全流程构建脚本 |
 | `rope_qk_layer0/README.md` | F2 数学定义、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_rope_qk_host.py` | F2 软件自检、固定位置、自动递增和随机位置上板比较工具 |
+| `model_tools/kv_cache_reference.py` | F3 28 层/16384 token 容量、地址、真实 K/V 和载荷金标准 |
+| `model_tools/kv_cache_reference.json` | F3 四个真实固定槽、边界地址和数组/载荷 SHA256 清单 |
+| `model_tools/test_kv_cache_reference.py` | F3 容量、地址连续性、越界、载荷和真实清单测试 |
+| `kv_cache_f3/rtl/kv_cache_ctrl.v` | F3 UART、当前 K/V 写入、位置推进和历史分段 burst 读取控制器 |
+| `kv_cache_f3/pnr/build_kv_cache.tcl` | F3 独立 PDS 全流程构建脚本 |
+| `kv_cache_f3/README.md` | F3 容量决策、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_kv_cache_host.py` | F3 软件自检、真实固定、层间隔离和随机层/位置上板工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -692,9 +717,9 @@ F2 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 F3 KV Cache：基于 F2 已验证的 Q/K RoPE 输出和模型 28 层、2 个 KV heads、head_dim=64，
-先定义 1 GiB DDR3 中每层、每个 token 的 K/V Cache 地址布局、容量公式和上下文长度边界。
-随后建立软件地址参考与固定清单，新建独立 KV Cache 工程，完成当前 token K/V 写入、历史 token
-顺序读取、位置索引推进、层间/token 间防覆盖和越界错误处理，并执行软件压力、PDS、多角时序、
-真实上板固定与随机层/位置测试。不得覆盖 F2 及更早阶段的验证工程和位流。
+进入 F4 Attention Score：基于 F1 已验证的 Q、F2 RoPE 输出和 F3 历史 K Cache，
+先建立 Q·K 点积、1/sqrt(head_dim)=1/8 定点缩放、causal mask 和 GQA head 映射的软件金标准。
+随后新建独立 Attention Score 工程，实现 14 个 Q heads 对 2 个 KV heads 的循环调度、历史 token
+顺序读取和 score 输出，并执行固定/随机序列、边界、PDS、多角时序和真实上板测试。
+本阶段不得提前进入 Softmax，不得覆盖 F3 及更早阶段的验证工程和位流。
 ```

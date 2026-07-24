@@ -791,9 +791,66 @@ sin/cos = signed int32 Q1.30
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
 - 固件：`PANGU50K ROPE QK V1`，DDR3 初始化成功。
 
-## 十七、当前项目状态
+## 十七、F3 KV Cache 已完成（2026-07-24）
 
-当前已经完成十一级真实闭环：
+新增软件参考、固定清单、独立硬件工程和上位机：
+
+```text
+model_tools/kv_cache_reference.py
+model_tools/kv_cache_reference.json
+model_tools/test_kv_cache_reference.py
+kv_cache_f3/rtl/kv_cache_ctrl.v
+kv_cache_f3/rtl/kv_cache_top.v
+kv_cache_f3/pnr/build_kv_cache.tcl
+kv_cache_f3/pnr/program_sram.tcl
+kv_cache_f3/README.md
+tools/pangu_kv_cache_host.py
+```
+
+容量与布局结论：
+
+```text
+K = [2,64] signed int64 Q28 = 1024 B
+V = [2,64] signed int64 Q28 = 1024 B
+单 token 槽 = 2048 B
+低端保留区 = 128 MiB
+KV Cache = 896 MiB
+每层 = 32 MiB
+层数 = 28
+硬件上下文 = 16384 token
+```
+
+完整支持模型标称 32768 positions 需要 1792 MiB，超过板载 1 GiB，因此 F3 第一版将硬件上下文确定为 16384。Controller 地址公式为：
+
+```text
+K = 0x02000000 + layer × 0x00800000 + position × 0x00000200
+V = K + 0x00000100
+```
+
+首槽从字节地址 `0x08000000` 开始，layer27/position16383 的末槽严格结束于 `0x40000000`，即 1 GiB 边界。硬件支持当前 token 写入后自动推进位置，以及一次连续 1..16 token 的历史 K/V 分段 AXI burst 顺序读取。
+
+验证结果：
+
+- F3 新增单元测试 9/9 PASS；完整 `model_tools` 回归 64/64 PASS；
+- 软件地址、容量、边界、载荷往返随机压力 1000/1000 PASS，seed=`20260801`；
+- 固定真实 K/V 来自 F2 RoPE 后 K 和 F1 V，覆盖 layer0 position `0..1`、layer13 position `2026`、layer27 position `16383`；全部真实上板逐位一致；
+- 连续 position 自动推进和 2 token 历史顺序读取通过；固定测试约 1.66 秒；
+- 最后槽结束于 1 GiB，下一 token 写入被错误码 `0x05` 正确拒绝；
+- layer3/layer17 在相同 position `4096` 写入不同 K/V，跨配置回读均逐位一致，层间无覆盖；
+- 真实随机层、随机 position、每批 1..16 token 上板回归 300/300 token PASS，seed=`20260801`，约 124.41 秒；
+- 随机回归周期性重新读取旧层旧位置，证明后续写入没有覆盖此前数据；
+- PDS 编译、综合、Device Map、布局布线、时序和位流生成全部成功，最终未布线网络 0；
+- 资源：7572 LUT、9884 FF、70 个 distributed RAM、0 DRM、0 APM；
+- 多角时序 `All Constraints Met`；慢角 core setup WNS=`+1.781 ns`、TNS=0，hold WHS=`+0.171 ns`、THS=0；快角 setup WNS=`+4.142 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；
+- 恢复、移除和最小脉宽无违例；
+- 位流：`kv_cache_f3\pnr\generate_bitstream\kv_cache_top.sbit`，大小 2101696 B；
+- 位流 SHA256：`11a0240a2ee42f0c92b6a5919f4a4b71ceb7bb806b55f1810b4ef3ff88d23216`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K KV CACHE V1`，DDR3 初始化成功。
+
+## 十八、当前项目状态
+
+当前已经完成十二级真实闭环：
 
 ```text
 长度16单点积
@@ -807,29 +864,30 @@ sin/cos = signed int32 Q1.30
 → 真实 tied Embedding Token 行查表与 Q6.10 格式转换闭环
 → 真实 layer0 Q/K/V 与 14Q/2KV GQA head-major 布局闭环
 → 真实 layer0 Q/K Qwen2 split-half RoPE、位置递增和 Q28/Q1.30 闭环
+→ 28 层、16384 token K/V Cache 写入、历史顺序读取、边界和防覆盖闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、动态 896/128 行调度、GQA head 布局、Qwen2 split-half RoPE、位置表自动推进、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、动态 896/128 行调度、GQA head 布局、Qwen2 split-half RoPE、位置表自动推进、28 层 KV 地址调度、当前 token 写入、历史分段 burst 读取、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 KV Cache、Attention、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、KV Cache、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 Attention Score、Softmax、Attention 输出、MLP、Transformer Block 和文本生成。
 
-## 十八、下一阶段路线
+## 十九、下一阶段路线
 
-### 当前唯一下一步：F3 KV Cache
+### 当前唯一下一步：F4 Attention Score
 
-1. 基于 F2 已验证的 RoPE 后 K/V 布局，确认模型 28 层、2 个 KV heads、head_dim 64 和目标上下文长度对应的容量需求。
-2. 定义 1 GiB DDR3 中每层、每个 token 的 K/V Cache 地址公式、对齐方式、分区边界和防覆盖规则。
-3. 建立 KV Cache 软件地址参考、固定清单和越界测试。
-4. 新建独立 KV Cache 工程，完成当前 token K/V 写入、历史 token 顺序读取和位置索引推进。
-5. 完成随机层、随机 token 位置、上下文边界和层间/token 间防覆盖验证。
-6. 完成软件压力、PDS 全流程、多角时序、真实上板和随机压力验证，不覆盖 F2 及更早阶段工程和位流。
+1. 基于 F1 已验证的 Q、F2 RoPE 输出和 F3 历史 K Cache，建立 Q·K 点积软件金标准。
+2. 明确 `head_dim=64` 对应的 `1/sqrt(head_dim)=1/8` 定点缩放、舍入和饱和规则。
+3. 建立 14 个 Q heads 到 2 个 KV heads 的 GQA 映射，并定义 score 输出布局。
+4. 加入 causal mask，覆盖当前位置、历史位置和越界边界。
+5. 新建独立 Attention Score 工程，实现历史 K 顺序读取、多头循环调度和 score 输出。
+6. 完成固定/随机序列、PDS 全流程、多角时序和真实上板验证；本阶段不得提前进入 Softmax。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. KV Cache。
-2. Attention Score 与 Softmax。
+1. Attention Score。
+2. Softmax。
 3. Attention 输出。
 4. MLP。
 5. Transformer Block。

@@ -1,0 +1,181 @@
+{
+  "format_version": 1,
+  "layout": {
+    "ddr_bytes": 1073741824,
+    "reserved_low_bytes": 134217728,
+    "kv_base_bytes": 134217728,
+    "kv_base_ctrl": 33554432,
+    "num_layers": 28,
+    "max_context": 16384,
+    "model_max_position_embeddings": 32768,
+    "kv_heads": 2,
+    "head_dim": 64,
+    "element_format": "signed int64 Q28",
+    "vector_bytes": 1024,
+    "token_slot_bytes": 2048,
+    "token_slot_beats": 64,
+    "layer_stride_bytes": 33554432,
+    "layer_stride_ctrl": 8388608,
+    "kv_total_bytes": 939524096,
+    "kv_end_bytes": 1073741824,
+    "address_formula_ctrl": "K=0x02000000 + layer*0x00800000 + position*0x00000200; V=K+0x00000100"
+  },
+  "cases": [
+    {
+      "layer": 0,
+      "position": 0,
+      "address": {
+        "k_base_bytes": 134217728,
+        "v_base_bytes": 134218752,
+        "slot_end_bytes": 134219776,
+        "k_base_ctrl": 33554432,
+        "v_base_ctrl": 33554688,
+        "slot_end_ctrl": 33554944
+      },
+      "sha256": {
+        "k_q28": "20728d329c32c722b0194032897bc3cf9a3a31323317e389d8fd7b6f78745474",
+        "v_q28": "162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168",
+        "token_payload": "11bbaa5adb6b3250404bd508bc46e10d80bedba04d1b2440f9744b882fa169ca"
+      },
+      "preview": {
+        "k_head0_first8": [
+          -1352895551,
+          -1666056552,
+          -3170882584,
+          492614199,
+          -808869512,
+          2409646799,
+          2105947821,
+          -763045456
+        ],
+        "v_head0_first8": [
+          61693339,
+          -3586350,
+          -155647370,
+          -109848146,
+          11029025,
+          101104329,
+          -43721742,
+          -4058723
+        ]
+      }
+    },
+    {
+      "layer": 0,
+      "position": 1,
+      "address": {
+        "k_base_bytes": 134219776,
+        "v_base_bytes": 134220800,
+        "slot_end_bytes": 134221824,
+        "k_base_ctrl": 33554944,
+        "v_base_ctrl": 33555200,
+        "slot_end_ctrl": 33555456
+      },
+      "sha256": {
+        "k_q28": "fd12ac1742b6f7ad8f01c005b36bc8494159c79acb655c4154e9cc99f2d316fb",
+        "v_q28": "162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168",
+        "token_payload": "86e518b08be537acf51e33b6cc75abaadf509f199a094ec743e8aa38b2ab1ec4"
+      },
+      "preview": {
+        "k_head0_first8": [
+          -1255145084,
+          -2317045067,
+          -3306404901,
+          1072540161,
+          -885557490,
+          2470554554,
+          2178703834,
+          -863051530
+        ],
+        "v_head0_first8": [
+          61693339,
+          -3586350,
+          -155647370,
+          -109848146,
+          11029025,
+          101104329,
+          -43721742,
+          -4058723
+        ]
+      }
+    },
+    {
+      "layer": 13,
+      "position": 2026,
+      "address": {
+        "k_base_bytes": 574574592,
+        "v_base_bytes": 574575616,
+        "slot_end_bytes": 574576640,
+        "k_base_ctrl": 143643648,
+        "v_base_ctrl": 143643904,
+        "slot_end_ctrl": 143644160
+      },
+      "sha256": {
+        "k_q28": "0f8625c3063eb62726c7b3bfc933af4d70652014cd4b63a0ba772916a4c02622",
+        "v_q28": "162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168",
+        "token_payload": "95aec9a82a8daf2cee5c872f47efc93b868dee01d335a15b1a35e36b36804c20"
+      },
+      "preview": {
+        "k_head0_first8": [
+          1080852556,
+          265603911,
+          -2975364761,
+          1953472827,
+          7979364,
+          881356423,
+          1845178600,
+          2206013554
+        ],
+        "v_head0_first8": [
+          61693339,
+          -3586350,
+          -155647370,
+          -109848146,
+          11029025,
+          101104329,
+          -43721742,
+          -4058723
+        ]
+      }
+    },
+    {
+      "layer": 27,
+      "position": 16383,
+      "address": {
+        "k_base_bytes": 1073739776,
+        "v_base_bytes": 1073740800,
+        "slot_end_bytes": 1073741824,
+        "k_base_ctrl": 268434944,
+        "v_base_ctrl": 268435200,
+        "slot_end_ctrl": 268435456
+      },
+      "sha256": {
+        "k_q28": "396dadcc528a7f13c82e8818c5d7dd54ceb320addc36e152b4930fa87e456d8a",
+        "v_q28": "162622e05e0013ca342f28032cb280c264f428f93a197eb67dbfafd76e20a168",
+        "token_payload": "86c2fa83fa0ffd31cf943728f0a0e5fc1e92349f043b2db5ad7b7b27ea4dd9ac"
+      },
+      "preview": {
+        "k_head0_first8": [
+          997244381,
+          -1914883697,
+          3327314120,
+          835788167,
+          818134761,
+          2331138388,
+          -2265712422,
+          -410796029
+        ],
+        "v_head0_first8": [
+          61693339,
+          -3586350,
+          -155647370,
+          -109848146,
+          11029025,
+          101104329,
+          -43721742,
+          -4058723
+        ]
+      }
+    }
+  ]
+}

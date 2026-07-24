@@ -403,3 +403,17 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - F2 新增单元测试 7/7 PASS；完整 `model_tools` 回归 55/55 PASS；
 - 软件随机 Q/K 与位置压力 1000/1000 PASS，seed=`20260730`；
 - 固定清单：`rope_layer0_reference.json`。
+
+
+2026-07-24 建立 F3 KV Cache 地址、容量和真实 K/V 软件参考：
+
+- 模型层数 28、KV heads 2、head_dim 64，K/V 均为 head-major signed int64 Q28；
+- 单个 K/V 各 1024 B，每 token 固定槽 2048 B；
+- 完整 32768 positions 需要 1792 MiB，超过板载 1 GiB，因此硬件上下文确定为 16384；
+- DDR3 低端 128 MiB 保留，高端 896 MiB KV 区按每层 32 MiB 划分；
+- Controller 地址：`K=0x02000000 + layer*0x00800000 + position*0x200`，`V=K+0x100`；
+- layer0/position0 首槽从 128 MiB 开始，layer27/position16383 末槽严格结束于 1 GiB；
+- 固定真实 K 来自 F2 RoPE 后输出，V 来自 F1 输出，覆盖 layer0/0、layer0/1、layer13/2026、layer27/16383；
+- F3 新增单元测试 9/9 PASS；完整 `model_tools` 回归 64/64 PASS；
+- 软件地址、连续性、越界、载荷往返随机压力 1000/1000 PASS，seed=`20260801`；
+- 固定清单：`kv_cache_reference.json`。

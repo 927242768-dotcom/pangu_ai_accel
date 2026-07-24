@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表、F1 Q/K/V 线性层和 F2 RoPE 均已完成。`rope_qk_layer0` 已真实上板运行 layer0 Q=`[14,64]`、K=`[2,64]` 的 Qwen2 split-half RoPE，确认 `dim i` 与 `dim i+32` 配对、`rope_theta=1000000`、signed Q28/Q1.30、位置自动递增；固定位置全输出逐位一致，软件随机 1000/1000 PASS，真实随机位置 300/300 PASS，多角时序 TNS/THS=0。下一步进入 F3 KV Cache：先定义 28 层、2 个 KV heads、head_dim 64 和 token 位置对应的 DDR3 地址布局、容量边界、写入/历史读取和防覆盖闭环，不覆盖任何已有验证工程和位流
+- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表、F1 Q/K/V、F2 RoPE 和 F3 KV Cache 均已完成。`kv_cache_f3` 已在 1 GiB DDR3 中以低端 128 MiB 保留区、高端 896 MiB KV 区支持 28 层、2 个 KV heads、head_dim 64 和 16384 token；真实 F2-K/F1-V 固定边界、自动位置推进、1..16 token 历史顺序读取、跨层防覆盖和上下文越界均已上板通过，软件随机 1000/1000 PASS、真实随机 300/300 token PASS，多角时序 TNS/THS=0。下一步进入 F4 Attention Score：实现 Q·K 点积、`1/sqrt(head_dim)` 缩放、causal mask 和多头循环调度，不覆盖任何已有验证工程和位流
