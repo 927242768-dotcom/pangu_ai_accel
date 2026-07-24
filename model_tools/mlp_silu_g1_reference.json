@@ -1,0 +1,127 @@
+{
+  "format_version": 1,
+  "operator": "qwen2_layer0_mlp_silu_gate",
+  "definition": {
+    "input_source": "verified layer0 gate_proj output",
+    "input_format": "signed int64 Q28 [4864]",
+    "rescale": "symmetric signed RNE right shift 18",
+    "silu_input_format": "signed Q6.10 int16 [4864] with explicit saturation",
+    "silu_scheme": "E2 verified PWL64 endpoints",
+    "silu_range": "[-8,8), x<-8 -> 0, x>=8 -> x",
+    "output_format": "signed Q6.10 int16 [4864]",
+    "pwl_entries": 65,
+    "pwl_padded_entries": 80,
+    "upload_bytes": 39072,
+    "result_bytes": 9728,
+    "forbidden_next_operation": "SiLU(gate) * up is not part of this stage"
+  },
+  "sha256": {
+    "pwl65_q6_10": "8f69a63f172a1c5efec8ae247181050300ea82f7580270b7c89220f4a250ccf4"
+  },
+  "cases": [
+    {
+      "label": "layer0 MLP SiLU(gate) query=0, count=1",
+      "query_position": 0,
+      "count": 1,
+      "rescale_saturated_count": 0,
+      "pwl_max_abs_error_lsb": 4,
+      "range": {
+        "gate_q28_min": -615152222,
+        "gate_q28_max": 484865734,
+        "gate_q10_min": -2347,
+        "gate_q10_max": 1850
+      },
+      "sha256": {
+        "gate_q28": "4c1c79e14e8f788aeaaaea64924863f847ca276fd8b99b7406cfb6a50fbcea4e",
+        "gate_q10": "e0e93a2f084df97fa95fbb2b96269cdf4b2fb0eb009ae48d8bfd61a96284f549",
+        "silu_exact_q10": "5e78d0ca6cb9ec83dc803b2bab04d1254c21c2c9e9637dfce933bfd5c22e7696",
+        "silu_pwl_q10": "d3a50e88eba59160b61eccaf9a25c0d3f5dd8c5f799dbd28ede20acbd383cd18",
+        "upload_payload": "dc4cee00ee280d3094e06b40755dc3fc0df68930581c9f8ee3bf5f434f9a7eae"
+      },
+      "preview": {
+        "gate_q28_first8": [124325768, 17940607, -44103066, -38177913, 179940646, -69133926, -54906867, -40331177],
+        "gate_q10_first16": [474, 68, -168, -146, 686, -264, -209, -154, -2347, 298, -560, -676, -799, 436, 60, -298],
+        "silu_pwl_first16": [293, 38, -74, -64, 457, -115, -91, -67, -216, 173, -203, -227, -250, 267, 34, -125],
+        "silu_pwl_last16": [756, -251, -66, -69, -52, 105, -28, -151, -179, -226, -283, 561, 194, 290, -222, -265]
+      }
+    },
+    {
+      "label": "layer0 MLP SiLU(gate) query=1, count=2",
+      "query_position": 1,
+      "count": 2,
+      "rescale_saturated_count": 0,
+      "pwl_max_abs_error_lsb": 4,
+      "range": {
+        "gate_q28_min": -567224784,
+        "gate_q28_max": 756530840,
+        "gate_q10_min": -2164,
+        "gate_q10_max": 2886
+      },
+      "sha256": {
+        "gate_q28": "42bbe0f30579275a6411abd9ad020639e0aedb9060efdccb544f5e5f4a3203c3",
+        "gate_q10": "4452bc52e7072cd37952cf02d621beba9f5bbb4ec67bdc658d9c0d7b521143b4",
+        "silu_exact_q10": "5cf20efb861e99bed512c794d4fe93277cd37fb2096a5c2dbf6183fd1e117788",
+        "silu_pwl_q10": "4dc5e4f4d3240ce628ee7db071ed31faa570212a1a5dc56e5b01c69d9702d310",
+        "upload_payload": "7d5ed25be890d7b58d32e649481869ecebca6cbd914999a1679d9f8076c7f4d1"
+      },
+      "preview": {
+        "gate_q28_first8": [-278400766, -156512887, 107967794, -54341621, 31829128, 65411296, 54956568, 74775535],
+        "gate_q10_first16": [-1062, -597, 412, -207, 121, 250, 210, 285, 688, -753, 231, -98, 460, 878, 70, -146],
+        "silu_pwl_first16": [-276, -211, 251, -91, 68, 141, 118, 164, 459, -243, 130, -43, 283, 620, 39, -64],
+        "silu_pwl_last16": [-121, -137, -75, -82, 933, 237, 58, 175, 23, 348, -23, -233, -206, 285, -137, -151]
+      }
+    },
+    {
+      "label": "layer0 MLP SiLU(gate) query=5, count=6",
+      "query_position": 5,
+      "count": 6,
+      "rescale_saturated_count": 0,
+      "pwl_max_abs_error_lsb": 4,
+      "range": {
+        "gate_q28_min": -951334722,
+        "gate_q28_max": 686302294,
+        "gate_q10_min": -3629,
+        "gate_q10_max": 2618
+      },
+      "sha256": {
+        "gate_q28": "869b64d81d6c5f2cacc314fd869a2e20eceee7014571b0974595a81b8acf34dc",
+        "gate_q10": "c0d13008687c87e5299ed0c88f2f7e7d6d4ab3291944a7108cb67eaa0764525b",
+        "silu_exact_q10": "afc3fbcf87abde8fa6605f085d7573d2894d488e245b56815793d0ab6a1b4a3e",
+        "silu_pwl_q10": "b807ad37514a9bd1702625666f2c13670bfa460c423a2fc53fe483a44900e9c9",
+        "upload_payload": "e4e814bec0b4c306d2bf5688b6afbfd60947d6494216fe722659bf9b11bb3da8"
+      },
+      "preview": {
+        "gate_q28_first8": [68877155, 129336266, -127847122, 33507099, -16451704, 132499989, 28264048, 96788091],
+        "gate_q10_first16": [263, 493, -488, 128, -63, 505, 108, 369, -1567, 1093, -27, -283, 80, 903, 63, -438],
+        "silu_pwl_first16": [149, 306, -185, 72, -28, 314, 61, 221, -278, 815, -12, -121, 45, 642, 35, -170],
+        "silu_pwl_last16": [316, -146, 234, -18, -178, -10, -23, 269, -212, 20, 124, -161, -207, 193, 118, -207]
+      }
+    },
+    {
+      "label": "layer0 MLP SiLU(gate) query=15, count=16",
+      "query_position": 15,
+      "count": 16,
+      "rescale_saturated_count": 0,
+      "pwl_max_abs_error_lsb": 4,
+      "range": {
+        "gate_q28_min": -547413705,
+        "gate_q28_max": 573423230,
+        "gate_q10_min": -2088,
+        "gate_q10_max": 2187
+      },
+      "sha256": {
+        "gate_q28": "449c12f1f2904a1c4f56892a4c7049f7c785862b4c9ad9b7922b1990f161f7f6",
+        "gate_q10": "4fb3223e2e03b7dd360035ff5942fdc317a55de06eda356751a0f9ddbc1a5aaf",
+        "silu_exact_q10": "3af0a9f72a43e925ddd4835deed166b5d293301853c56cafb458ffd23263ea47",
+        "silu_pwl_q10": "4f16572a82b583edb041444edf7bdea5841ffcc3a5a7de71a28cae138f2e980e",
+        "upload_payload": "0b55f8b9fcfa773bb395a2bed3223664013fabb0fd21a670b36c17cee2d5409c"
+      },
+      "preview": {
+        "gate_q28_first8": [-36648738, -23008629, 115464240, 230541543, -142780386, -10894675, 40064396, -62996584],
+        "gate_q10_first16": [-140, -88, 440, 879, -545, -42, 153, -240, -820, -39, 500, -49, -299, -875, 312, -793],
+        "silu_pwl_first16": [-61, -38, 270, 620, -200, -18, 86, -105, -252, -17, 311, -21, -126, -258, 182, -249],
+        "silu_pwl_last16": [410, -97, 98, -208, 246, -215, 175, 700, -14, 221, 123, 489, -94, 101, 341, 195]
+      }
+    }
+  ]
+}

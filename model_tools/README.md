@@ -122,6 +122,8 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
 | `elementwise_k896_reference.json` | E2 固定边界向量、SiLU 全输入域误差和关键数组 SHA256 |
+| `mlp_silu_reference.py` | G1 gate Q28→Q6.10 signed RNE、显式饱和、PWL64 `SiLU(gate)` 和载荷金标准 |
+| `mlp_silu_g1_reference.json` | G1 四组真实 `SiLU(gate)` 完整输出、PWL 端点和上传载荷 SHA256 清单 |
 | `embedding_fixed_reference.py` | E3 Token 行地址、真实 packed INT4/FP16 scale 到 UQ4.28/Q6.10 的硬件等价参考 |
 | `embedding_k896_reference.json` | E3 固定 Token 的地址、载荷、输出范围和 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
@@ -136,6 +138,7 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `test_attention_residual_reference.py` | F6 signed RNE tie、INT64 极值、双重饱和、连贯真实 Attention 链和随机测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
+| `test_mlp_silu_reference.py` | G1 Q28 RNE tie、INT64 极值、尾部、饱和、载荷和四组真实 gate 测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
 
 ## 6. 常用命令
@@ -525,3 +528,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 新增单元测试 6/6 PASS；完整 `model_tools` 回归 116/116 PASS；
 - 双投影软件随机/边界压力 1000/1000 PASS，seed=`20260808`，覆盖全零、交替 `INT16_MIN/MAX`、常量、稀疏、小幅值和一般/完整 int16 随机输入；
 - 固定清单：`mlp_gate_up_g1_reference.json`；上位机：`../tools/pangu_mlp_gate_up_host.py`。
+
+
+2026-07-25 建立 G1 layer0 MLP `SiLU(gate)` 真实非线性软件参考：
+
+- 输入直接复用 G1 gate projection 四组已经真实上板逐位通过的 `[4864]` signed int64 Q28 输出，query/count 为 `0/1`、`1/2`、`5/6`、`15/16`；
+- Q28 到 Q6.10 固定为对称 signed RNE 右移 18 位，并显式饱和到 signed int16；`INT64_MIN` 使用无符号二补码幅值路径，正负 half-way tie 均按偶数舍入；
+- SiLU 严格复用 E2 PWL64：65 个 signed Q6.10 端点，主区间 `[-8,8)`，尾部 `x<-8 -> 0`、`x>=8 -> x`，完整 int16 输入域最大误差 4 Q10 LSB；
+- 四组真实 gate 范围约为 `[-3.5440,2.8183]`，均不触发 PWL 尾部或 Q6.10 饱和；
+- 四组 PWL 输出 SHA256 为 `d3a50e88...83cd18`、`4dc5e4f4...2d310`、`b807ad37...e9c9`、`4f16572a...e980e`；
+- 固定上传载荷为 39072 B：38912 B gate Q28 与补齐到 80 项的 160 B PWL 端点；结果为 9728 B signed Q6.10；
+- 新增单元测试 7/7 PASS；完整 `model_tools` 回归 123/123 PASS；
+- 软件随机/边界压力 1000/1000 PASS，seed=`20260809`，覆盖全零、`INT64_MIN/MAX`、RNE tie、`±8` 尾部、int16 饱和边界、稀疏、一般范围和完整随机 int64 bit pattern；
+- 固定清单：`mlp_silu_g1_reference.json`；上位机：`../tools/pangu_mlp_silu_host.py`；独立工程说明：`../mlp_silu_g1/README.md`。

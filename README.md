@@ -25,10 +25,12 @@
 19. [`attention_oproj_f6/README.md`](attention_oproj_f6/README.md)：已验证的 F6 `[896]` Attention 输入量化、真实 layer0 O_proj M896K896 分组 INT4 和 signed int64 Q28 闭环。
 20. [`attention_residual_f6/README.md`](attention_residual_f6/README.md)：已验证的完整 layer0 Attention 连贯软件链、Q28→Q6.10 重标定和第一处残差闭环。
 21. [`post_attention_layernorm_g1/README.md`](post_attention_layernorm_g1/README.md)：已验证的真实 layer0 post_attention_layernorm、连贯 MLP 输入和独立 RMSNorm 闭环。
+22. [`mlp_gate_up_g1/README.md`](mlp_gate_up_g1/README.md)：已验证的真实 layer0 gate/up 双投影、共享激活和完整 `[4864]` Q28 闭环。
+23. [`mlp_silu_g1/README.md`](mlp_silu_g1/README.md)：已验证的 gate Q28→Q6.10 signed RNE、PWL64 `SiLU(gate)` 和完整 `[4864]` 非线性闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、第一处残差的完整 layer0 Attention 子层，以及 G1 MLP 输入 `post_attention_layernorm` 闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、第一处残差的完整 layer0 Attention 子层，以及 G1 MLP 输入 `post_attention_layernorm`、gate/up 双投影和独立 `SiLU(gate)` 闭环：
 
 ```text
 长度16单点积：
@@ -80,13 +82,15 @@ G1 MLP 输入 `post_attention_layernorm` 现已完成。独立工程 `post_atten
 
 G1 MLP `gate_proj` 与 `up_proj` 真实双投影现已完成。独立工程 `mlp_gate_up_g1` 直接消费上述四组 `[896]` signed Q6.10 post-attention RMSNorm 输出，两路真实权重均为 `[4864,896]`、group size 64 的对称 signed INT4，且均无 bias；两路共享同一份逐向量对称 INT8 激活，combined scale 为 UQ4.28，输出为 signed int64 Q28。四组连贯输入共 8 个完整投影全部 `4864/4864` 上板逐位一致；新增测试 `6/6 PASS`，完整软件回归 `116/116 PASS`，软件随机/边界 `1000/1000 PASS`，真实板卡全零/极值/一般随机双路合计 `6/6 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.916 ns`、TNS=0、hold WHS=`+0.157 ns`、THS=0；位流 SHA256=`e72959d2968a543bf3a2bcfd31f2b2c7a0d31a9888daba9ceac2d7c50cd5db6b`。
 
+G1 MLP `SiLU(gate)` 现已完成。独立工程 `mlp_silu_g1` 直接消费四组已验证 gate projection `[4864]` signed int64 Q28 输出，执行对称 signed RNE 右移 18 位、signed int16 Q6.10 显式饱和和 E2 已验证 PWL64 SiLU；没有重算 gate/up，也没有提前执行乘法。四组 query/count=`0/1、1/2、5/6、15/16` 的完整结果全部 `4864/4864` 上板逐位一致；新增测试 `7/7 PASS`，完整软件回归 `123/123 PASS`，软件随机/边界 `1000/1000 PASS`，真实 FPGA 六批累计 `300/300 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+1.468 ns`、TNS=0、hold WHS=`+0.169 ns`、THS=0；快角 hold WHS=`+0.100 ns`、THS=0；位流 SHA256=`87e643c65b70949297d54042921ac62e70454c018b6ff31f1386bbf2c8770550`。
+
 ## 当前唯一下一任务
 
 ```text
-完成 layer0 MLP `SiLU(gate)` 的真实非线性闭环。输入直接来自已经真实上板逐位通过的 gate_proj
-`[4864]` signed int64 Q28 输出；先固定 Q28 到 SiLU 输入格式的 RNE、缩放和饱和规则，再完成
-软件金标准、独立硬件流式调度、PDS、多角时序、JTAG SRAM 和真实上板逐位压力测试。
-SiLU(gate) 全部通过前不得进入 SiLU(gate) × up。
+独立完成 layer0 MLP `SiLU(gate) × up`。输入直接使用已经分别真实上板逐位通过的
+`SiLU(gate)` `[4864]` signed Q6.10 和 `up_proj` `[4864]` signed int64 Q28；先冻结格式对齐、
+乘法完整位宽、RNE 和正负饱和规则，再完成软件金标准、独立硬件流式调度、PDS、多角时序、
+JTAG SRAM 和真实上板逐位压力测试。该乘法单独通过前不得进入 down projection。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

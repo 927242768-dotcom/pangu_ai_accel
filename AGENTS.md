@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3、D2、E1-E3、F1-F6 已完成，完整 layer0 Attention 子层已真实上板闭环；G1 MLP 输入 `post_attention_layernorm` 也已完成，四组连贯真实 Attention 输出逐位一致，完整软件回归 110/110 PASS、软件随机/边界 1000/1000 PASS、真实 FPGA 300/300 PASS，多角时序 TNS/THS=0。当前唯一下一任务是完成 layer0 `gate_proj` 与 `up_proj` 的真实 `[4864,896]` 双投影闭环；两路通过前不得进入 SiLU 或 gate×up，也不得覆盖任何已有验证工程和位流
+- 当前阶段：D1.3、D2、E1-E3、F1-F6 已完成，完整 layer0 Attention 子层已真实上板闭环；G1 的 `post_attention_layernorm`、`gate_proj`、`up_proj` 和独立 `SiLU(gate)` 也已完成。最新 `SiLU(gate)` 使用 Q28→Q6.10 signed RNE、显式饱和和 E2 PWL64，四组连贯真实输出全部 4864/4864 逐位一致，完整软件回归 123/123 PASS、软件随机/边界 1000/1000 PASS、真实 FPGA 300/300 PASS，多角时序 TNS/THS=0。当前唯一下一任务是独立完成 `SiLU(gate) × up`；该乘法通过前不得进入 down projection，也不得覆盖任何已有验证工程和位流

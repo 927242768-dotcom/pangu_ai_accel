@@ -606,7 +606,7 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 - [x] MLP 输入 `post_attention_layernorm`
 - [x] gate projection
 - [x] up projection
-- [ ] SiLU(gate)
+- [x] SiLU(gate)
 - [ ] SiLU(gate) × up
 - [ ] down projection
 - [ ] 残差连接
@@ -634,6 +634,19 @@ G1 `gate_proj` 与 `up_proj` 真实双投影验证证据（2026-07-24）：
 - 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.916 ns`、TNS=0，hold WHS=`+0.157 ns`、THS=0；快角 setup WNS=`+3.046 ns`、TNS=0，hold WHS=`+0.089 ns`、THS=0；恢复、移除和最小脉宽无违例；
 - 位流：`mlp_gate_up_g1/pnr/generate_bitstream/mlp_gate_up_top.sbit`，大小 2101696 B，SHA256=`e72959d2968a543bf3a2bcfd31f2b2c7a0d31a9888daba9ceac2d7c50cd5db6b`；
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K MLP GATEUP V1`，DDR3 初始化成功；gate/up 已全部通过，现允许进入 `SiLU(gate)`，但不得提前执行乘法。
+
+G1 `SiLU(gate)` 真实非线性验证证据（2026-07-25）：
+
+- 新增独立 `mlp_silu_g1` 工程，输入直接复用上述四组已经真实上板逐位通过的 gate projection `[4864]` signed int64 Q28 输出；本阶段没有重算 gate/up，也没有执行 `SiLU(gate) × up`；
+- 固定数值规则为 Q28 对称 signed RNE 右移 18 位并显式饱和到 signed int16 Q6.10，再复用 E2 已验证的 PWL64 SiLU；主区间 `[-8,8)`，尾部 `x<-8 -> 0`、`x>=8 -> x`，相对精确 SiLU 的完整 int16 输入域最大误差 4 Q10 LSB；
+- 四组真实 gate 范围约为 `[-3.5440,2.8183]`，均未触发 PWL 尾部或 Q6.10 饱和；四组 query/count=`0/1、1/2、5/6、15/16` 的完整 `[4864]` 输出均真实上板 `4864/4864` 逐位一致；输出 SHA256 分别为 `d3a50e88eba59160b61eccaf9a25c0d3f5dd8c5f799dbd28ede20acbd383cd18`、`4dc5e4f4d3240ce628ee7db071ed31faa570212a1a5dc56e5b01c69d9702d310`、`b807ad37514a9bd1702625666f2c13670bfa460c423a2fc53fe483a44900e9c9`、`4f16572a82b583edb041444edf7bdea5841ffcc3a5a7de71a28cae138f2e980e`；
+- 新增单元测试 7/7 PASS，完整 `model_tools` 回归 123/123 PASS；软件固定载荷与随机/边界压力 1000/1000 PASS，seed=`20260809`，覆盖全零、`INT64_MIN/MAX`、RNE half-way tie、`±8` 尾部、int16 饱和边界、稀疏、一般范围和完整随机 int64 bit pattern；
+- 独立上传载荷 39072 B：38912 B gate Q28 与补齐到 80 项的 160 B PWL 端点；结果为 9728 B signed Q6.10；RTL 使用 4-bank DRM 缓存将 1216 个输入 beat 重排为 304 个输出 beat；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，最终未布线网络为 0；资源为 8024 LUT、7901 FF、70 个 distributed RAM、32 DRM、1 APM、79 IO；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+1.468 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；快角 setup WNS=`+3.793 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复、移除和最小脉宽无违例；显式 seed17/29 的首版仍有 1 条 Fast hold `-0.015 ns`，未被接受，最终默认 PnR 版本全角为 0；
+- 位流：`mlp_silu_g1/pnr/generate_bitstream/mlp_silu_top.sbit`，大小 2101696 B，SHA256=`87e643c65b70949297d54042921ac62e70454c018b6ff31f1386bbf2c8770550`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K MLP SILU V1`，DDR3 初始化成功；四组固定输入合计约 17.16 秒；
+- 真实 FPGA 随机/边界分六批累计 300/300 PASS，seeds=`20260809..20260814`，所有 4864 项均与 Python 金标准逐位一致；`SiLU(gate)` 已完整通过，现允许进入 `SiLU(gate) × up`，但不得提前进入 down projection。
 
 ### G2 单个 Transformer Block
 
@@ -858,6 +871,15 @@ G1 `gate_proj` 与 `up_proj` 真实双投影验证证据（2026-07-24）：
 | `mlp_gate_up_g1/pnr/program_sram.tcl` | G1 gate/up 位流仅下载 FPGA 易失性 SRAM 的脚本 |
 | `mlp_gate_up_g1/README.md` | G1 双投影定点、载荷、时序、位流和真实上板证据 |
 | `tools/pangu_mlp_gate_up_host.py` | G1 gate/up 软件自检、四组固定和随机/边界上板逐位比较工具 |
+| `model_tools/mlp_silu_reference.py` | G1 gate Q28→Q6.10 signed RNE、显式饱和、PWL64 SiLU 与载荷金标准 |
+| `model_tools/mlp_silu_g1_reference.json` | G1 四组真实 `SiLU(gate)` 完整输出、PWL 表和载荷 SHA256 清单 |
+| `model_tools/test_mlp_silu_reference.py` | G1 RNE tie、INT64 极值、尾部、饱和、载荷与真实固定输入测试 |
+| `mlp_silu_g1/rtl/mlp_silu_core.v` | G1 4-bank gate 缓存、Q28 重标定、PWL64 插值和 Q6.10 打包核心 |
+| `mlp_silu_g1/rtl/mlp_silu_ctrl.v` | G1 UART、DDR3 上传/burst、核心调度、结果写回和回读控制器 |
+| `mlp_silu_g1/pnr/build_mlp_silu.tcl` | G1 `SiLU(gate)` 独立 PDS 全流程构建脚本 |
+| `mlp_silu_g1/pnr/program_sram.tcl` | G1 `SiLU(gate)` 位流仅下载 FPGA 易失性 SRAM 的脚本 |
+| `mlp_silu_g1/README.md` | G1 数值定义、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_mlp_silu_host.py` | G1 软件自检、四组真实固定和随机/边界上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -875,9 +897,9 @@ G1 `gate_proj` 与 `up_proj` 真实双投影验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-G1 MLP 的唯一下一任务：完成 layer0 `SiLU(gate)` 的真实非线性闭环。输入必须直接来自本阶段已经
-真实上板逐位通过的 gate_proj `[4864]` signed int64 Q28 输出；首先固定 Q28 到 SiLU 输入格式的
-RNE、缩放和正负饱和规则，再复用或扩展已验证的 SiLU 定点/PWL 定义，建立四组连贯真实输入、
-随机/边界软件参考、独立硬件流式调度、PDS 全流程、多角时序、JTAG SRAM 和逐位上板压力测试。
-`SiLU(gate)` 单独全部通过前不得执行 `SiLU(gate) × up`。
+G1 MLP 的唯一下一任务：独立完成 layer0 `SiLU(gate) × up`。两路输入必须直接来自已经分别
+真实上板逐位通过的 `SiLU(gate)` `[4864]` signed Q6.10 和 `up_proj` `[4864]` signed int64 Q28；
+首先冻结格式对齐、乘法完整位宽、round-to-nearest-even 和正负饱和规则，再建立四组连贯真实
+输入、随机/边界软件参考、独立硬件流式调度、PDS 全流程、多角时序、JTAG SRAM 和逐位上板压力。
+`SiLU(gate) × up` 单独全部通过前不得进入 `down_proj`。
 ```
