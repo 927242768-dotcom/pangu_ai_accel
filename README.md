@@ -13,10 +13,11 @@
 7. [`model_tools/README.md`](model_tools/README.md)：已确认的 `.p50` 文件头、真实张量目录、INT4 格式和按名提取工具。
 8. [`gemv_int4_group_q28/README.md`](gemv_int4_group_q28/README.md)：已验证的真实 q_proj M=4、K=896 分组 UQ4.28 定点小闭环。
 9. [`gemv_int4_qproj_full/README.md`](gemv_int4_qproj_full/README.md)：已验证的 layer0 q_proj 完整 M=896、K=896 真实 Linear 层闭环。
+10. [`rmsnorm_k896/README.md`](rmsnorm_k896/README.md)：已验证的 layer0 input_layernorm K=896 定点 RMSNorm 闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积到完整真实 Linear 层的多级计算闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到首个基础非矩阵算子 RMSNorm 的多级计算闭环：
 
 ```text
 长度16单点积：
@@ -42,13 +43,15 @@ D2 的首个真实模型 FPGA 小闭环也已完成。独立工程 `gemv_int4_gr
 
 D2 完整真实 Linear 层现已完成。独立工程 `gemv_int4_qproj_full` 将 layer0 `q_proj` 扩展到完整 M=896、K=896：逐行读取真实 packed INT4 权重、UQ4.28 scale 和 signed Q28 bias，每 4 行结果立即流式写回 DDR3，最终返回 896 个 signed int64。固定完整层真实上板逐位一致，输出 SHA256=`ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`；随机激活上板 `3/3 PASS`，软件压力测试 `1000/1000 PASS`。PDS 全流程和多角时序通过，慢角 100 MHz WNS=`+0.670 ns`、TNS=0；位流 SHA256=`432454b80678c11f493856cb725d791e271d86eada1b5cabccefc0d7486f8894`。
 
+E1 RMSNorm 也已完成。独立工程 `rmsnorm_k896` 对真实 `model.layers.0.input_layernorm.weight` 执行 K=896 定点 RMSNorm：输入、gamma 和输出使用 signed Q6.10，40 位平方和、Q12.20 均值/epsilon、UQ12.20 LUT256 rsqrt，全部采用 RNE 和显式饱和。固定向量 896 个输出与 Python LUT 金标准逐位一致，输出 SHA256=`1f52890780e0f4cc0f734d47a4e3bdb28c3c964b8734b442d7781d4ca155a4f0`；软件随机 `1000/1000 PASS`，真实上板随机 `300/300 PASS`。PDS 全流程和多角时序通过，慢角 100 MHz WNS=`+0.374 ns`、TNS=0；位流 SHA256=`94c82d1ef6adf563043c6f90f5744ec258156d85c6db134389132ae4f2938b11`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 E1 RMSNorm：先建立 layer0 input_layernorm 的 Python 定点金标准，明确输入/输出格式、
-平方和与均值位宽、epsilon、gamma 格式、舍入和饱和规则，并比较查表与 Newton-Raphson
-两类 rsqrt 近似的误差和资源。随后在新的独立工程中完成 K=896 RMSNorm 小闭环，
-逐元素对比软件参考，并完成随机压力、PDS、多角时序和真实上板验证。
+进入 E2 元素级运算：先为统一 signed Q6.10 激活建立残差加法、定点乘法/缩放和
+元素级乘法的 Python 硬件等价参考，固定 RNE、饱和和边界规则；再比较 SiLU / x·sigmoid(x)
+的 LUT 与分段线性近似，选定第一版实现。随后新建独立 K=896 元素级算子工程，完成
+DDR3 读取、计算、结果回写、逐元素比较、随机压力、PDS、多角时序和真实上板验证。
 不得覆盖任何已有验证工程和位流。
 ```
 

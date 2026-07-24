@@ -102,8 +102,11 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
 | `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
+| `rmsnorm_fixed_reference.py` | layer0 input_layernorm 的 Q6.10、Q12.20、LUT/NR rsqrt 与硬件等价金标准 |
+| `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
 | `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
+| `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 
 ## 6. 常用命令
 
@@ -178,6 +181,22 @@ python tools\pangu_gemv_qproj_full_host.py selftest --rounds 1000 --seed 2026072
 ```
 
 该工具从真实镜像一次性提取完整权重、FP16 scale 和 bias，之后复用这些模型数据生成不同激活的逐行 signed int64 Q28 金标准，并验证 488320 B 上传载荷的打包、补齐和往返一致性。
+
+生成 layer0 `input_layernorm` K=896 定点参考并查看 LUT/NR 比较：
+
+```bat
+python model_tools\rmsnorm_fixed_reference.py ^
+  --manifest model_tools\rmsnorm_layer0_reference.json
+```
+
+运行 RMSNorm 载荷与 1000 组软件压力自检：
+
+```bat
+python tools\pangu_rmsnorm_k896_host.py selftest ^
+  --rounds 1000 --seed 20260726
+```
+
+RMSNorm 第一版使用 signed Q6.10 输入、gamma 和输出，40 位平方和、Q12.20 均值/epsilon、UQ12.20 rsqrt，并统一采用 RNE 和显式饱和。完整硬件协议、DDR3 地址和上板证据见 `rmsnorm_k896/README.md`。
 
 ## 7. 真实 Linear 量化与定点定义
 
@@ -270,3 +289,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 完整层固定载荷打包/解包和独立 Q28 重算通过；
 - 1000 组不同激活软件压力测试全部通过，seed 起点=`20260725`，耗时约 25.88 秒；
 - 固定清单：`q_proj_full_reference.json`。
+
+2026-07-24 完成 layer0 `input_layernorm` K=896 定点软件参考：
+
+- 真实张量：`model.layers.0.input_layernorm.weight`，连续 FP16、长度 896；
+- 模型 `rms_norm_eps=1e-6`，Q12.20 中量化为 `1`；
+- 输入、gamma 和输出：signed Q6.10 int16；平方和：40 位；rsqrt：UQ12.20 uint32；
+- 所有转换、除法和右移使用 RNE，输出显式饱和；
+- 比较 256 项中点 LUT 与 32 项种子 LUT + 一次 Newton-Raphson；第一版选择 LUT256；
+- 固定向量 `sum_squares=5176164753`、`variance_q20=5776971`、`lut_rsqrt_q20=446797`；
+- 固定输出 SHA256：`1f52890780e0f4cc0f734d47a4e3bdb28c3c964b8734b442d7781d4ca155a4f0`；
+- 相关单元测试与既有回归合计 23/23 PASS；
+- RMSNorm 软件随机压力：1000/1000 PASS，seed=`20260726`；
+- 固定清单：`rmsnorm_layer0_reference.json`。

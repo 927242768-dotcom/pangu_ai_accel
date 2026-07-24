@@ -495,9 +495,85 @@ model_tools/q_proj_full_reference.json
 - 固定完整层上传、计算和回读约 43.03 秒；
 - 随机激活真实上板回归：`3/3 PASS`，seed=`20260725..20260727`，约 130.13 秒。
 
-## 十二、当前项目状态
+## 十二、2026-07-24 新完成：E1 layer0 input_layernorm K=896 RMSNorm
 
-当前已经完成六级真实闭环：
+新增独立工程、软件参考、固定清单和上位机：
+
+```text
+model_tools/rmsnorm_fixed_reference.py
+model_tools/test_rmsnorm_fixed_reference.py
+model_tools/rmsnorm_layer0_reference.json
+rmsnorm_k896/rtl/rmsnorm_k896_core.v
+rmsnorm_k896/rtl/rmsnorm_k896_ctrl.v
+rmsnorm_k896/rtl/rmsnorm_k896_top.v
+rmsnorm_k896/pnr/build_rmsnorm_k896.tcl
+rmsnorm_k896/pnr/program_sram.tcl
+rmsnorm_k896/README.md
+tools/pangu_rmsnorm_k896_host.py
+```
+
+真实对象为 `model.layers.0.input_layernorm.weight`，连续 FP16、长度 K=896；模型 `rms_norm_eps=1e-6`。算子定义为：
+
+```text
+y_i = gamma_i * x_i * rsqrt(mean(x^2) + epsilon)
+```
+
+第一版定点格式：
+
+- 输入、gamma 和输出：signed Q6.10 int16；
+- 平方和：unsigned 40 位，保留 20 位小数；
+- 均值和 epsilon：Q12.20，epsilon 量化为 `1`；
+- rsqrt：unsigned UQ12.20 uint32；
+- 浮点转整数、除法和右移统一采用 RNE；
+- 输出显式饱和到 signed int16。
+
+软件比较了 256 项中点 LUT 和 32 项种子 LUT + 一次 Newton-Raphson。固定向量中 LUT256 的 rsqrt 相对误差为约 `1.3878e-4`，最终输出相对精确定点路径最多相差 1 个 Q10 LSB；NR1 更精确但需要额外乘法流水，因此第一版选择 LUT256。
+
+固定向量关键值：
+
+```text
+sum_squares     = 5176164753
+mean_square_q20 = 5776970
+variance_q20    = 5776971
+exact_rsqrt_q20 = 446735
+lut_rsqrt_q20   = 446797
+output first16  = [20, -16, -38, -11, -71, 4, -65, -32,
+                   140, -32, -36, 13, 43, -1, -71, 68]
+```
+
+DDR3 与 UART 闭环：
+
+```text
+UART 上传 4608 B
+→ DDR3 保存 1792 B 输入、1792 B gamma、1024 B LUT
+→ FPGA 分段读取并缓存
+→ 平方和、RNE 均值、LUT rsqrt、gamma 乘法和输出饱和
+→ 896 个 int16 结果写回 DDR3
+→ UART 返回并由 Python 逐元素比较
+```
+
+验证结果：
+
+- 相关软件单元测试：23/23 PASS；
+- RMSNorm 软件随机压力：1000/1000 PASS，seed=`20260726`；
+- 固定输出 SHA256：`1f52890780e0f4cc0f734d47a4e3bdb28c3c964b8734b442d7781d4ca155a4f0`；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功；
+- 最终未布线网络：0；
+- 资源：8801 LUT、7051 FF、12 DRM、9 APM；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.374 ns`、TNS=0，WHS=`+0.171 ns`、THS=0；快角 WNS=`+2.832 ns`、TNS=0，WHS=`+0.100 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`rmsnorm_k896\pnr\generate_bitstream\rmsnorm_k896_top.sbit`；
+- 位流 SHA256：`94c82d1ef6adf563043c6f90f5744ec258156d85c6db134389132ae4f2938b11`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K RMSNORM K896 V1`，DDR3 初始化成功；
+- 固定真实上板：896 个 signed Q6.10 输出与 Python LUT256 金标准逐位一致，端到端约 0.61 秒；
+- 真实随机上板：300/300 PASS，seed=`20260726..20261025`，约 183.11 秒。
+
+时序优化过程：首版 rsqrt 常数校正、动态移位和后级乘法串联导致慢角 WNS=`-4.219 ns`；拆分 rsqrt 流水后提升至 `-0.968 ns`。继续为输入平方与累加、输出 RNE/饱和/打包增加寄存边界后，最终慢角 WNS 收敛到 `+0.374 ns`，所有角落 TNS=0。
+
+## 十三、当前项目状态
+
+当前已经完成七级真实闭环：
 
 ```text
 长度16单点积
@@ -506,34 +582,36 @@ model_tools/q_proj_full_reference.json
 → GEMV 周期计数、带宽、GMAC/s、利用率和瓶颈分析
 → 真实 q_proj M4K896 分组 UQ4.28 signed INT64 Q28 小闭环
 → 真实 layer0 q_proj M896K896 完整 Linear 层闭环
+→ 真实 layer0 input_layernorm K896 定点 RMSNorm 闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、RMSNorm 平方和/均值/LUT rsqrt、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；第一个完整真实 Linear 层已经完成，尚未实现 RMSNorm、Attention、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；首个完整真实 Linear 层和首个基础非矩阵算子已经完成，尚未实现元素级运算、Attention、MLP、Transformer Block 和文本生成。
 
-## 十三、下一阶段路线
+## 十四、下一阶段路线
 
-### 当前唯一下一步：E1 RMSNorm
+### 当前唯一下一步：E2 元素级运算
 
-1. 从真实 `.p50` 提取 layer0 `input_layernorm.weight`，确认 K=896 的 gamma 布局。
-2. 建立 Python 定点金标准，明确输入/输出格式、平方和与均值位宽、epsilon、gamma 格式、舍入和饱和规则。
-3. 比较查表和 Newton-Raphson 两类 `rsqrt` 近似的误差、资源和流水延迟，选定第一版实现。
-4. 新建独立 RMSNorm 工程，不覆盖任何已有验证工程和位流。
-5. 完成 DDR3 输入/gamma 读取、平方和、均值、`rsqrt`、gamma 乘法和逐元素输出。
-6. 完成固定向量逐元素比较、随机压力、PDS 全流程、多角时序和真实上板验证。
+1. 为统一 signed Q6.10 激活建立残差加法、定点乘法/缩放和元素级乘法的 Python 硬件等价参考。
+2. 明确 RNE、饱和、溢出和边界向量。
+3. 比较 SiLU / `x·sigmoid(x)` 的 LUT 与分段线性近似误差、资源和流水延迟。
+4. 新建独立 K=896 元素级算子工程，不覆盖任何已有验证工程和位流。
+5. 完成 DDR3 双向量读取、残差/乘法/SiLU 计算、结果回写和 Python 逐元素比较。
+6. 完成固定向量、随机压力、PDS 全流程、多角时序和真实上板验证。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. RMSNorm。
-2. Q/K/V 线性层。
-3. RoPE。
-4. Attention。
-5. MLP。
-6. Transformer Block。
-7. 完整模型权重加载与分层调度。
-8. tokenizer、采样与文本推理验证。
+1. 元素级运算。
+2. Embedding/查表。
+3. Q/K/V 线性层。
+4. RoPE。
+5. Attention。
+6. MLP。
+7. Transformer Block。
+8. 完整模型权重加载与分层调度。
+9. tokenizer、采样与文本推理验证。
 
 每一步都应保留“FPGA 结果与 Python 参考逐元素自动比较”的闭环，避免直接跳到完整模型后难以定位错误。

@@ -1,0 +1,159 @@
+{
+  "format_version": 1,
+  "operator": "qwen2_rmsnorm",
+  "gamma_tensor": "model.layers.0.input_layernorm.weight",
+  "length": 896,
+  "formula": "gamma * x * rsqrt(mean(x^2) + epsilon)",
+  "epsilon": {
+    "float": 1e-06,
+    "q12_20": 1,
+    "quantized_float": 9.5367431640625e-07
+  },
+  "fixed_formats": {
+    "activation": "signed Q6.10 int16",
+    "gamma": "signed Q6.10 int16",
+    "sum_squares": "unsigned 40-bit integer with 20 fractional bits",
+    "mean_square": "unsigned Q12.20",
+    "rsqrt": "unsigned UQ12.20 uint32",
+    "output": "signed Q6.10 int16",
+    "rounding": "round_to_nearest_even",
+    "saturation": "explicit signed/unsigned storage saturation"
+  },
+  "selected_rsqrt_scheme": "lut256_midpoint",
+  "fixed_scalar_values": {
+    "sum_squares": 5176164753,
+    "mean_square_q20": 5776970,
+    "variance_q20": 5776971,
+    "exact_rsqrt_q20": 446735,
+    "lut_rsqrt_q20": 446797,
+    "nr_rsqrt_q20": 446720
+  },
+  "quantization": {
+    "activation_clipped_count": 0,
+    "gamma_clipped_count": 0,
+    "exact_output_saturated_count": 0,
+    "lut_output_saturated_count": 0,
+    "nr_output_saturated_count": 0
+  },
+  "errors": {
+    "input_and_gamma_quantization_max_abs": 0.0008322816648004203,
+    "exact_fixed_vs_quantized_max_abs": 0.0006213322556146705,
+    "schemes": [
+      {
+        "name": "lut256_midpoint",
+        "rsqrt_q20": 446797,
+        "rsqrt_absolute_error": 5.91278076171875e-05,
+        "rsqrt_relative_error": 0.0001387847381557299,
+        "output_max_abs_error": 0.0009765625,
+        "output_mean_abs_error": 7.62939453125e-06,
+        "output_mismatch_count": 7,
+        "output_saturated_count": 0,
+        "lut_entries": 256,
+        "lut_bits_per_entry": 32,
+        "estimated_lut_bits": 8192,
+        "multiplier_note": "rsqrt 本体无需乘法器；仅指数奇偶校正需要常数乘法",
+        "normalized_latency_note": "归一化 + 1 次 ROM + 指数校正"
+      },
+      {
+        "name": "lut32_newton1",
+        "rsqrt_q20": 446720,
+        "rsqrt_absolute_error": 1.430511474609375e-05,
+        "rsqrt_relative_error": 3.3576952779612075e-05,
+        "output_max_abs_error": 0.0009765625,
+        "output_mean_abs_error": 2.1798270089285713e-06,
+        "output_mismatch_count": 2,
+        "output_saturated_count": 0,
+        "lut_entries": 32,
+        "lut_bits_per_entry": 32,
+        "estimated_lut_bits": 1024,
+        "multiplier_note": "一次 NR 需要 y²、m·y²、y·修正项，可流水复用乘法器",
+        "normalized_latency_note": "归一化 + 1 次小 ROM + 1 次 NR + 指数校正"
+      }
+    ]
+  },
+  "preview": {
+    "output_float_first16": [
+      0.019366015597216582,
+      -0.015607460964076232,
+      -0.03702901310162238,
+      -0.011075128084692928,
+      -0.06918724311002121,
+      0.00391269574943764,
+      -0.06340498321979325,
+      -0.03183965688826232,
+      0.13770142027482665,
+      -0.030857070756676118,
+      -0.03505491487430194,
+      0.012297959779048424,
+      0.04246219542098037,
+      -0.0011062481910736413,
+      -0.06923155550671622,
+      0.06617346686236408
+    ],
+    "output_exact_q10_first16": [
+      20,
+      -16,
+      -38,
+      -11,
+      -71,
+      4,
+      -65,
+      -32,
+      140,
+      -32,
+      -36,
+      13,
+      43,
+      -1,
+      -71,
+      68
+    ],
+    "output_lut_q10_first16": [
+      20,
+      -16,
+      -38,
+      -11,
+      -71,
+      4,
+      -65,
+      -32,
+      140,
+      -32,
+      -36,
+      13,
+      43,
+      -1,
+      -71,
+      68
+    ],
+    "output_nr_q10_first16": [
+      20,
+      -16,
+      -38,
+      -11,
+      -71,
+      4,
+      -65,
+      -32,
+      140,
+      -32,
+      -36,
+      13,
+      43,
+      -1,
+      -71,
+      68
+    ]
+  },
+  "sha256": {
+    "activation_float32": "b21188653e9b89350f3fa879168c53f5a3cf2f8d30124f30c49ab41864d73790",
+    "activation_q6_10": "673f017fc17e07910e55a4c0dabb131f0385a6e851cb3e53bc5b9b0ad81690ec",
+    "gamma_float16": "07052984185bbd2d949e871564fdde8cc2779d1cc00f9c6760df53884e5c8d10",
+    "gamma_q6_10": "f850ab9bd97859f20e7850e4d414aebd18629dcc50a95daa51712cce340cb0ee",
+    "output_exact_q6_10": "e54c9e25c014a5cab21bc78105a409c82cf231285d07467e7330c793d956cc77",
+    "output_lut_q6_10": "1f52890780e0f4cc0f734d47a4e3bdb28c3c964b8734b442d7781d4ca155a4f0",
+    "output_nr_q6_10": "6878e38f3d89b3b891145de14087772d41424869e7a0e527f17e68fb0e6ddef8",
+    "lut256_uq12_20": "76ff1e6f79b00b125ca32deeaf5e62444eb06b6194c8815aea76b45e69e224c1",
+    "lut32_uq12_20": "99d3960bc4808d0bca30c42b6305d4fb3f4bb313e3bdc328d88702fd255ffa11"
+  }
+}

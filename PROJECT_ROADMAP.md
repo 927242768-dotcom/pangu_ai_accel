@@ -337,13 +337,35 @@ D2 完整真实 Linear 层验证证据（2026-07-24）：
 
 ### E1 RMSNorm
 
-- [ ] 平方和累加
-- [ ] 均值计算
-- [ ] `rsqrt` 近似方案确定：查表、Newton-Raphson 或软件辅助
-- [ ] gamma 权重乘法
-- [ ] 定点格式和饱和/舍入规则
-- [ ] Python 逐元素比较
-- [ ] 随机压力测试、时序和上板验证
+- [x] 平方和累加
+- [x] 均值计算
+- [x] `rsqrt` 近似方案确定：查表、Newton-Raphson 或软件辅助
+- [x] gamma 权重乘法
+- [x] 定点格式和饱和/舍入规则
+- [x] Python 逐元素比较
+- [x] 随机压力测试、时序和上板验证
+
+E1 验证证据（2026-07-24）：
+
+- 独立工程：`rmsnorm_k896`，未覆盖任何已有验证工程和位流；
+- 真实 gamma：`model.layers.0.input_layernorm.weight`，连续 FP16、长度 K=896；
+- 算子：`gamma * x * rsqrt(mean(x^2) + epsilon)`，`epsilon=1e-6`；
+- 定点格式：输入/gamma/输出为 signed Q6.10 int16，平方和 40 位，均值/epsilon 为 Q12.20，rsqrt 为 UQ12.20 uint32；
+- 所有浮点转整数、除法和右移使用 RNE，输出显式饱和；
+- rsqrt 比较：256 项中点 LUT 与 32 项种子 LUT + 一次 Newton-Raphson；第一版选择 LUT256；
+- 固定标量：`sum_squares=5176164753`、`variance_q20=5776971`、`lut_rsqrt_q20=446797`；
+- 固定输出 SHA256：`1f52890780e0f4cc0f734d47a4e3bdb28c3c964b8734b442d7781d4ca155a4f0`；
+- 软件相关单元测试：23/23 PASS；RMSNorm 软件随机压力：1000/1000 PASS，seed=`20260726`；
+- DDR3 闭环：上传 4608 B，读取输入/gamma/LUT，计算 896 个输出，写回 DDR3 后通过 UART 返回；
+- 固定真实上板：896 个 signed Q6.10 输出与 Python LUT256 金标准逐位一致，端到端约 0.61 秒；
+- 真实随机上板：300/300 PASS，seed=`20260726..20261025`，约 183.11 秒；
+- PDS：编译、综合、Device Map、布局布线、时序分析和位流生成全部成功，最终未布线网络 0；
+- 资源：LUT=`8801`、FF=`7051`、DRM=`12`、APM=`9`；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.374 ns`、TNS=0，WHS=`+0.171 ns`、THS=0；快角 WNS=`+2.832 ns`、TNS=0，WHS=`+0.100 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`rmsnorm_k896/pnr/generate_bitstream/rmsnorm_k896_top.sbit`；
+- SHA256：`94c82d1ef6adf563043c6f90f5744ec258156d85c6db134389132ae4f2938b11`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash。
 
 ### E2 元素级运算
 
@@ -544,6 +566,14 @@ D2 完整真实 Linear 层验证证据（2026-07-24）：
 | `model_tools/q_proj_m4k896_reference.json` | layer0 q_proj 固定切片输出、误差上界和关键数组 SHA256 |
 | `model_tools/q_proj_full_reference.json` | layer0 q_proj 完整层固定输出、上传布局和关键数组 SHA256 |
 | `model_tools/test_linear_quant_reference.py` | 格式单测、1000 轮软件压力和真实 q_proj 集成回归 |
+| `model_tools/rmsnorm_fixed_reference.py` | layer0 RMSNorm Q6.10/Q12.20、LUT/NR rsqrt 和硬件等价金标准 |
+| `model_tools/rmsnorm_layer0_reference.json` | RMSNorm 固定向量、关键标量和数组 SHA256 清单 |
+| `model_tools/test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma 和 1000 轮软件压力测试 |
+| `rmsnorm_k896/rtl/rmsnorm_k896_core.v` | 已验证 K=896 平方和、均值、LUT rsqrt、gamma 乘法和饱和核心 |
+| `rmsnorm_k896/rtl/rmsnorm_k896_ctrl.v` | 已验证 RMSNorm UART、DDR3 载荷、结果回写和回读调度 |
+| `rmsnorm_k896/pnr/build_rmsnorm_k896.tcl` | E1 RMSNorm 独立 PDS 构建脚本 |
+| `rmsnorm_k896/README.md` | E1 定点格式、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_rmsnorm_k896_host.py` | RMSNorm 固定载荷、软件自检、固定与随机上板比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -561,10 +591,10 @@ D2 完整真实 Linear 层验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 E1 RMSNorm：先为 layer0 input_layernorm 建立 K=896 的 Python 定点金标准，明确输入/输出格式、
-平方和与均值位宽、epsilon、gamma 格式、舍入和饱和规则；比较查表和 Newton-Raphson 两类
-rsqrt 近似方案的误差、资源和流水延迟，选定第一版实现。
-随后在新的独立工程中完成 RMSNorm 小闭环：DDR3 读取输入和真实 gamma，计算平方和、均值、
-rsqrt、gamma 乘法与逐元素输出，和 Python 逐元素比较，并完成固定向量、随机压力、PDS、
-多角时序和真实上板验证。不得覆盖任何已有验证工程和位流。
+进入 E2 元素级运算：先为统一 signed Q6.10 激活建立残差加法、定点乘法/缩放和
+元素级乘法的 Python 硬件等价参考，固定 RNE、饱和和边界向量；再比较 SiLU / x·sigmoid(x)
+的 LUT 与分段线性近似误差、资源和流水延迟，选定第一版实现。
+随后新建独立 K=896 元素级算子工程，完成 DDR3 读取两个向量、残差/乘法/SiLU 计算、
+结果写回、Python 逐元素比较、固定向量、随机压力、PDS、多角时序和真实上板验证。
+不得覆盖任何已有验证工程和位流。
 ```
