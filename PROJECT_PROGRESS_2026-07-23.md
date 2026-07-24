@@ -439,9 +439,65 @@ tools/pangu_gemv_group_q28_host.py
 
 首版组合 MAC16 在慢角有 WNS=`-0.109 ns`、TNS=`-0.163 ns` 的 2 个违例端点。改为显式平衡流水归约后，最终报告为 `All Constraints Met`。
 
-## 十一、当前项目状态
+## 十一、2026-07-24 新完成：D2 layer0 q_proj 完整真实 Linear 层
 
-当前已经完成五级真实闭环：
+新增独立工程、工具和固定清单：
+
+```text
+gemv_int4_qproj_full/rtl/int8_dot16_pipe.v
+gemv_int4_qproj_full/rtl/gemv_qproj_full_core.v
+gemv_int4_qproj_full/rtl/gemv_qproj_full_ctrl.v
+gemv_int4_qproj_full/rtl/gemv_qproj_full_top.v
+gemv_int4_qproj_full/pnr/build_gemv_qproj_full.tcl
+gemv_int4_qproj_full/pnr/program_sram.tcl
+gemv_int4_qproj_full/README.md
+tools/pangu_gemv_qproj_full_host.py
+model_tools/q_proj_full_reference.json
+```
+
+固定验收对象为 layer0 `q_proj` 全部 896 个输出行、完整 K=896 输入，每行 14 个 64 元素 group。
+
+完整上传载荷共 `488320 B`：
+
+- 激活：896 B；
+- packed INT4 权重：401408 B；
+- 每行补齐到 64 B 的 UQ4.28 scale：57344 B；
+- 每行补齐到 32 B 的 signed int64 bias_q28：28672 B。
+
+硬件计算和结果调度：
+
+```text
+激活读取并缓存一次
+→ 每行读取14拍权重、2拍scale、1拍bias
+→ 每组4次流水MAC16形成INT32点积
+→ signed INT32 × unsigned UQ4.28
+→ signed INT64 Q28跨14组累加并加入bias
+→ 每4行组成一个256 bit拍立即写回DDR3
+→ 完成后从DDR3逐拍读取并通过UART流式返回896个int64
+```
+
+验证结果：
+
+- 固定载荷打包/解包、补齐区域和独立 Q28 重算：PASS；
+- 固定完整层输出 SHA256：`ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`；
+- 前 4 行与已验证的 M4K896 小闭环逐位完全一致；
+- 软件随机激活压力测试：`1000/1000 PASS`，seed 起点=`20260725`，约 25.88 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功；
+- 最终未布线网络：0；
+- 资源：8510 LUT、7619 FF、4 DRM、12 APM；
+- 多角时序：`All Constraints Met`；慢角 100 MHz WNS=`+0.670 ns`、TNS=0，WHS=`+0.171 ns`、THS=0；快角 WNS=`+3.034 ns`、TNS=0，WHS=`+0.100 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`gemv_int4_qproj_full\pnr\generate_bitstream\gemv_qproj_full_top.sbit`；
+- 位流 SHA256：`432454b80678c11f493856cb725d791e271d86eada1b5cabccefc0d7486f8894`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K QPROJ FULL V1`，DDR3 初始化成功；
+- 固定完整层真实上板：896 个 signed int64 与 Python 金标准逐位一致；
+- 固定完整层上传、计算和回读约 43.03 秒；
+- 随机激活真实上板回归：`3/3 PASS`，seed=`20260725..20260727`，约 130.13 秒。
+
+## 十二、当前项目状态
+
+当前已经完成六级真实闭环：
 
 ```text
 长度16单点积
@@ -449,36 +505,35 @@ tools/pangu_gemv_group_q28_host.py
 → 运行时参数化 M/K、尾块屏蔽的通用 packed INT4 GEMV
 → GEMV 周期计数、带宽、GMAC/s、利用率和瓶颈分析
 → 真实 q_proj M4K896 分组 UQ4.28 signed INT64 Q28 小闭环
+→ 真实 layer0 q_proj M896K896 完整 Linear 层闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、自动地址调度、结果写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、完整输出行调度、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 q_proj 只完成前 4 个输出行，尚未完成一个完整 Linear 层。
+当前仍不是完整 Qwen 推理；第一个完整真实 Linear 层已经完成，尚未实现 RMSNorm、Attention、MLP、Transformer Block 和文本生成。
 
-## 十二、下一阶段路线
+## 十三、下一阶段路线
 
-### 当前唯一下一步：D2 完整真实 Linear 层
+### 当前唯一下一步：E1 RMSNorm
 
-1. 新建独立工程，不覆盖任何已验证工程和位流。
-2. 把 M4K896 小闭环扩展到 layer0 `q_proj` 全部输出行。
-3. 增加逐行 packed 权重、scale 和 bias 地址递增。
-4. 结果按行流式写回 DDR3，避免片上缓存完整输出向量。
-5. Python 从真实 `.p50` 生成完整层载荷和逐行 signed int64 Q28 金标准。
-6. 固定完整层输出必须逐元素完全一致。
-7. 随后完成随机激活回归、PDS 全流程、多角时序和真实上板验证。
+1. 从真实 `.p50` 提取 layer0 `input_layernorm.weight`，确认 K=896 的 gamma 布局。
+2. 建立 Python 定点金标准，明确输入/输出格式、平方和与均值位宽、epsilon、gamma 格式、舍入和饱和规则。
+3. 比较查表和 Newton-Raphson 两类 `rsqrt` 近似的误差、资源和流水延迟，选定第一版实现。
+4. 新建独立 RMSNorm 工程，不覆盖任何已有验证工程和位流。
+5. 完成 DDR3 输入/gamma 读取、平方和、均值、`rsqrt`、gamma 乘法和逐元素输出。
+6. 完成固定向量逐元素比较、随机压力、PDS 全流程、多角时序和真实上板验证。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. 真实量化缩放和一个模型 Linear 层。
-2. RMSNorm。
-3. Q/K/V 线性层。
-4. RoPE。
-5. Attention。
-6. MLP。
-7. Transformer Block。
-8. 完整模型权重加载与分层调度。
-9. tokenizer、采样与文本推理验证。
+1. RMSNorm。
+2. Q/K/V 线性层。
+3. RoPE。
+4. Attention。
+5. MLP。
+6. Transformer Block。
+7. 完整模型权重加载与分层调度。
+8. tokenizer、采样与文本推理验证。
 
 每一步都应保留“FPGA 结果与 Python 参考逐元素自动比较”的闭环，避免直接跳到完整模型后难以定位错误。

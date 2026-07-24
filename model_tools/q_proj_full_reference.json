@@ -1,0 +1,55 @@
+{
+  "format_version": 1,
+  "weight_tensor": "model.layers.0.self_attn.q_proj.weight",
+  "bias_tensor": "model.layers.0.self_attn.q_proj.bias",
+  "shape": {
+    "M": 896,
+    "K": 896,
+    "group_size": 64,
+    "groups_per_row": 14
+  },
+  "activation": {
+    "generator": "32-bit LCG",
+    "seed": 20260723,
+    "format": "symmetric per-vector INT8",
+    "scale": 0.0314826064222441,
+    "clipped_count": 0
+  },
+  "upload_layout_bytes": {
+    "activation_int8": 896,
+    "packed_weight_int4": 401408,
+    "combined_scale_uq4_28_padded": 57344,
+    "bias_q28_padded": 28672,
+    "total": 488320
+  },
+  "expected": {
+    "first_8_output_fixed_q28": [
+      207253689,
+      -173360554,
+      287606739,
+      -223225713,
+      -4687768431,
+      104298201,
+      301392249,
+      13611309
+    ],
+    "last_8_output_fixed_q28": [
+      1043114578,
+      -2138877247,
+      -1060954045,
+      241305015,
+      831408625,
+      67617978,
+      249103231,
+      582822115
+    ]
+  },
+  "sha256": {
+    "activation_int8": "2cd260ee0cfac02fb03f64e28eedeb2a929b868a028d61f4c4f0842edbcf5d76",
+    "packed_weight_int4": "aed36ffee9a996406ef5efac1e0ad53d251b0b46328bfb8914a13c43f2f17e64",
+    "combined_scale_uq4_28": "5b860621855e6c48eeb4ebc0bea6ae7dd9fd42d31d3f4011238e8a8b37e970b8",
+    "bias_q28": "0d1d1f3c82b40383bd8314af2532bfe7f64e23f8cb2dcee3f59154bcb35a23e3",
+    "output_fixed_q28": "ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0",
+    "upload_payload": "71893f988816fcdcf1a58a2c7b453a4fa544224db7cf47c41d39d9aa906251aa"
+  }
+}

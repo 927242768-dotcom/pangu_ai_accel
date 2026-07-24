@@ -101,6 +101,7 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `verify_p50_image.py` | 在结构全量校验基础上，对照源模型抽样验证量化误差 |
 | `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
 | `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
+| `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
 | `test_linear_quant_reference.py` | 量化格式、1000 轮随机压力和真实 q_proj 集成测试 |
 
@@ -169,6 +170,14 @@ python model_tools\linear_quant_reference.py ^
 ```
 
 完整 NPZ 包含 FPGA 后续可直接使用的激活 INT8、packed INT4 权重、FP16 weight scale、分组 INT32 累加、UQ4.28 组合 scale、bias Q28 和预期输出。仓库只提交小型 JSON 清单，完整 NPZ 可由真实 `.p50` 镜像确定性重建。
+
+生成并验证 layer0 `q_proj` 完整 M=896、K=896 载荷和金标准：
+
+```bat
+python tools\pangu_gemv_qproj_full_host.py selftest --rounds 1000 --seed 20260725
+```
+
+该工具从真实镜像一次性提取完整权重、FP16 scale 和 bias，之后复用这些模型数据生成不同激活的逐行 signed int64 Q28 金标准，并验证 488320 B 上传载荷的打包、补齐和往返一致性。
 
 ## 7. 真实 Linear 量化与定点定义
 
@@ -251,3 +260,13 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 随机软件压力测试：1000/1000 PASS，seed=`20260723`；
 - 固定向量清单：`q_proj_m4k896_reference.json`，记录关键数组 SHA256；
 - 本轮仍未修改 FPGA RTL、PDS 工程或任何已验证位流。
+
+2026-07-24 完成 layer0 `q_proj` 完整 Linear 软件参考与硬件载荷：
+
+- 完整形状：M=896、K=896、每行 14 个 group；
+- 固定上传载荷：488320 B；
+- 固定输出 SHA256：`ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`；
+- 前 4 行与已验证 M4K896 小闭环逐位一致；
+- 完整层固定载荷打包/解包和独立 Q28 重算通过；
+- 1000 组不同激活软件压力测试全部通过，seed 起点=`20260725`，耗时约 25.88 秒；
+- 固定清单：`q_proj_full_reference.json`。

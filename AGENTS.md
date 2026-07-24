@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施、D2 `.p50` 格式解析、真实 Linear 软件参考和首个真实模型 FPGA 分组 Q28 小闭环均已完成。`gemv_int4_group_q28` 已真实上板复现 layer0 q_proj 前 4 行、K=896 的固定 Q28 输出，并通过 1000 轮随机分组 scale 压力测试；多角时序 TNS=0。下一步在新的独立工程中扩展到 layer0 q_proj 完整输出行，增加逐行权重/scale/bias 调度和 signed int64 结果流式写回，不覆盖任何已有验证工程和位流
+- 当前阶段：D1.3 GEMV 性能基础设施和 D2 真实 Linear 已完成。`gemv_int4_qproj_full` 已真实上板完成 layer0 q_proj 完整 M=896、K=896 计算，896 个 signed int64 Q28 与 Python 金标准逐位一致；软件随机激活 1000/1000 PASS，真实上板随机激活 3/3 PASS，多角时序 TNS=0。下一步进入 E1 RMSNorm：先为 layer0 input_layernorm 建立 K=896 定点软件参考，确定平方和、均值、epsilon、gamma、舍入/饱和和 rsqrt 近似方案，再在新的独立工程中完成小闭环，不覆盖任何已有验证工程和位流

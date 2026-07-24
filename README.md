@@ -12,10 +12,11 @@
 6. [`gemv_int4_perf/README.md`](gemv_int4_perf/README.md)：已验证的 D1.3 周期计数、带宽、GMAC/s 和利用率分析工程。
 7. [`model_tools/README.md`](model_tools/README.md)：已确认的 `.p50` 文件头、真实张量目录、INT4 格式和按名提取工具。
 8. [`gemv_int4_group_q28/README.md`](gemv_int4_group_q28/README.md)：已验证的真实 q_proj M=4、K=896 分组 UQ4.28 定点小闭环。
+9. [`gemv_int4_qproj_full/README.md`](gemv_int4_qproj_full/README.md)：已验证的 layer0 q_proj 完整 M=896、K=896 真实 Linear 层闭环。
 
 ## 当前状态
 
-已经真实上板完成三级计算闭环：
+已经真实上板完成从单点积到完整真实 Linear 层的多级计算闭环：
 
 ```text
 长度16单点积：
@@ -39,13 +40,16 @@ D2 的模型格式解析和真实 Linear 软件参考均已完成：真实 `.p50
 
 D2 的首个真实模型 FPGA 小闭环也已完成。独立工程 `gemv_int4_group_q28` 对 layer0 `q_proj` 前 4 行、完整 K=896 输入执行每 64 元素分组 INT32 点积、UQ4.28 乘法、signed INT64 Q28 跨组累加和 bias 加法。固定向量 FPGA 输出 `[207253689, -173360554, 287606739, -223225713]` 与软件参考逐位一致，scale bit31/`0xFFFFFFFF` 边界通过，随机上板 `1000/1000 PASS`。PDS 多角时序 `All Constraints Met`，慢角 100 MHz WNS=`+0.909 ns`、TNS=0；位流 SHA256=`d8c7d194d4d8ce1e5d189df39fae5fc904030fe4be6e981a5876a4df73ea17bd`。
 
+D2 完整真实 Linear 层现已完成。独立工程 `gemv_int4_qproj_full` 将 layer0 `q_proj` 扩展到完整 M=896、K=896：逐行读取真实 packed INT4 权重、UQ4.28 scale 和 signed Q28 bias，每 4 行结果立即流式写回 DDR3，最终返回 896 个 signed int64。固定完整层真实上板逐位一致，输出 SHA256=`ea1f04bf4ff313dad07025ff35e66a088f13afd28d817422b89bb135f63525a0`；随机激活上板 `3/3 PASS`，软件压力测试 `1000/1000 PASS`。PDS 全流程和多角时序通过，慢角 100 MHz WNS=`+0.670 ns`、TNS=0；位流 SHA256=`432454b80678c11f493856cb725d791e271d86eada1b5cabccefc0d7486f8894`。
+
 ## 当前唯一下一任务
 
 ```text
-继续 D2：新建独立工程，把已验证的 M4K896 分组 Q28 小闭环扩展到 layer0 q_proj 完整输出行。
-增加完整输出行调度、逐行权重/scale/bias 地址递增和 signed int64 结果流式写回，
-避免在片上缓存整个输出向量。Python 从真实 .p50 生成完整层载荷和逐行 Q28 金标准，
-先完成固定完整层逐元素比较，再完成随机激活回归、PDS、多角时序和真实上板验证。
+进入 E1 RMSNorm：先建立 layer0 input_layernorm 的 Python 定点金标准，明确输入/输出格式、
+平方和与均值位宽、epsilon、gamma 格式、舍入和饱和规则，并比较查表与 Newton-Raphson
+两类 rsqrt 近似的误差和资源。随后在新的独立工程中完成 K=896 RMSNorm 小闭环，
+逐元素对比软件参考，并完成随机压力、PDS、多角时序和真实上板验证。
+不得覆盖任何已有验证工程和位流。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。
