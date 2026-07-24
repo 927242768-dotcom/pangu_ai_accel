@@ -1000,11 +1000,58 @@ concat = [896] head-major contiguous，共 7168 B
 - 位流 SHA256：`d7e64c58b73f8ca93f7a7dd981feabe5cc48f9b43e6b2ff0d8f60155886f36a3`；
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
 - 固件：`PANGU50K ATTN OUTPUT V1`，DDR3 初始化成功；
-- 本阶段严格停在加权和与多头拼接，尚未实现 `O_proj`、Attention 残差或 MLP。
+- 本阶段严格停在加权和与多头拼接，没有提前实现 `O_proj`、Attention 残差或 MLP。
 
-## 二十一、当前项目状态
+## 二十一、F6 layer0 Attention O_proj 已完成（2026-07-24）
 
-当前已经完成十五级真实闭环：
+新增软件参考、固定清单、独立硬件工程和上位机：
+
+```text
+model_tools/attention_oproj_reference.py
+model_tools/attention_oproj_f6_reference.json
+model_tools/test_attention_oproj_reference.py
+attention_oproj_f6/rtl/attention_oproj_top.v
+attention_oproj_f6/pnr/build_attention_oproj.tcl
+attention_oproj_f6/pnr/program_sram.tcl
+attention_oproj_f6/README.md
+tools/pangu_attention_oproj_host.py
+```
+
+真实模型与定点结论：
+
+```text
+input = F6 [14,64] head-major concat -> [896] signed int64 Q28
+weight = model.layers.0.self_attn.o_proj.weight，shape [896,896]
+storage = groupwise symmetric signed INT4，group_size=64，14 groups/row
+bias = .p50 中不存在，bias_q28 固定全 0
+activation = Q28 转 float32 后逐向量对称 INT8 [-127,127]
+combined scale = activation_scale * FP16 weight_scale -> unsigned UQ4.28
+group_acc = 64 项 INT8×INT4 的 signed INT32 点积
+output = 14 个 group product 在 signed int64 Q28 中累加
+```
+
+为避免覆盖已有工程，本阶段仅复用已经真实上板通过的完整 Linear `controller/core`，新建独立顶层和 PDS 工作目录。顶层直接实例化 DDR3 IP，保持板级约束所需的 `I_ipsxb_ddr_top` 层级。底层 UART 固件标识继续为通用协议版本 `PANGU50K QPROJ FULL V1`，但实际上传权重、scale、零 bias 和金标准均为真实 O_proj。
+
+验证结果：
+
+- O_proj 新增单元测试 7/7 PASS；完整 `model_tools` 回归 100/100 PASS；
+- 四组真实固定输入直接复用 F6 第一段的 1、2、6、16-token 窗口输出，真实参数、独立 Q28 重算、固定清单和 488320 B 载荷往返全部 PASS；
+- 四组 O_proj 输出 SHA256 为 `19008a25a59cde0f8def0c938ada397b6866dc143774b74c6ff77a2a95a7fcd5`、`0e70753bea148c81d0bce79360d250710a1cc6ee817a40e4b6cbccf7d4f30279`、`c0ffeb8b5a1168b661d52a34f34a5f4f12f3d075805b05b4ace346683cb8b018`、`af63d1efc3913f597fdcd5dbe520ac782a943074301a60b249f4f25a3cf34a65`；
+- 软件随机/边界 Attention Q28 输入和完整上传载荷压力 1000/1000 PASS，seed=`20260805`，约 35.26 秒；全零输入严格输出全零，固定用例 combined scale 饱和和 activation clipping 数均为 0；
+- PDS 编译、综合、Device Map、布局布线、时序和位流生成全部成功，最终未布线网络 0；
+- 资源：8510 LUT、7619 FF、326 个 distributed RAM、4 DRM、12 APM；
+- 多角时序 `All Constraints Met`；慢角 core setup WNS=`+0.614 ns`、TNS=0，hold WHS=`+0.171 ns`、THS=0；快角 setup WNS=`+3.023 ns`、TNS=0，hold WHS=`+0.101 ns`、THS=0；
+- 慢角 recovery WNS=`+2.919 ns`、removal WHS=`+0.537 ns`；快角 recovery WNS=`+4.898 ns`、removal WHS=`+0.337 ns`；最小脉宽无违例；
+- 位流：`attention_oproj_f6\pnr\generate_bitstream\attention_oproj_top.sbit`，大小 2101696 B；
+- 位流 SHA256：`017517f877f29e62d945ecd3ae4ba22c2d690b6e6b92778eb0502ba7ac115533`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；DDR3 初始化成功；
+- 四组真实固定输入的 896 个 O_proj 输出全部真实上板逐位一致，单组上传、计算与回读约 43.03~43.04 秒；
+- 真实 FPGA 全零、随机常量、稀疏极值和完整 896 维随机 Attention Q28 输入回归 4/4 PASS，seed=`20260805`，约 172.34 秒；
+- 本阶段严格停在 O_proj，尚未实现 Attention 残差、完整 Attention 子层或 MLP。
+
+## 二十二、当前项目状态
+
+当前已经完成十六级真实闭环：
 
 ```text
 长度16单点积
@@ -1022,21 +1069,22 @@ concat = [896] head-major contiguous，共 7168 B
 → 14Q/2KV GQA Attention Score、1/8 缩放、causal mask 和随机窗口闭环
 → 14 heads mask 感知 Softmax、PWL exp、Q31 倒数和概率归一化闭环
 → F5 概率 × F3 V、14Q/2KV GQA、Q59 累加、RNE 和 `[14,64]/[896]` Attention 输出闭环
+→ 真实 layer0 self_attn.o_proj M896K896 分组 INT4、零 bias 和 signed int64 Q28 闭环
 ```
 
 这证明 DDR3 Controller + PHY、长 burst、片上 DRM 缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、精确部分积重构、动态 896/128 行调度、GQA head 布局、Qwen2 split-half RoPE、位置表自动推进、28 层 KV 地址调度、当前 token 写入、历史分段 burst 读取、Attention Score、causal mask、mask 感知 Softmax、PWL exp、Q31 倒数、概率归一化、概率×V Q59 加权和、多头拼接、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、KV Cache、Attention Score、Softmax、Attention 加权和与多头拼接、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 Attention `O_proj`、Attention 残差、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、KV Cache、Attention Score、Softmax、Attention 加权和、多头拼接、真实 O_proj、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 Attention 残差、完整 Attention 子层、MLP、Transformer Block 和文本生成。
 
-## 二十二、下一阶段路线
+## 二十三、下一阶段路线
 
-### 当前唯一下一步：F6 `O_proj`
+### 当前唯一下一步：F6 Attention 残差与完整子层
 
-1. 直接消费已经真实上板逐位通过的 `[896]` Attention 多头拼接结果。
-2. 从真实 `.p50` 读取 layer0 `self_attn.o_proj=[896,896]` 分组 INT4 权重、scale 与 bias 定义。
-3. 优先复用已经验证的通用 GEMV / layer0 q_proj 数据通路，但建立隔离的 O_proj 软件清单、协议与工程入口，不覆盖 F6 加权和或更早工程。
-4. 完成固定真实输入、随机输入、PDS 全流程、多角时序、JTAG SRAM 和真实板卡逐位压力验证。
-5. O_proj 通过后再接 Attention 残差与完整 Attention 子层；不得提前进入 MLP。
+1. 明确 layer0 Attention 子层输入 hidden state 与 O_proj 输出的统一定点格式、量化/重标定边界和 signed 饱和规则。
+2. 把已经真实上板逐位通过的 O_proj `[896]` signed int64 Q28 输出与对应 Attention 输入 hidden state 建立残差连接。
+3. 优先复用已验证 `elementwise_k896` 残差能力，但建立隔离的软件清单、协议和硬件入口，不覆盖 O_proj、F6 加权和或更早工程。
+4. 建立完整 layer0 Attention 子层软件参考，完成真实固定 hidden state、随机输入、饱和边界、PDS 全流程、多角时序、JTAG SRAM 和真实板卡逐位压力验证。
+5. 完整 Attention 子层通过前不得进入 MLP。
 
 ### 后续算子
 

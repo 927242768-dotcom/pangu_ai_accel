@@ -551,7 +551,7 @@ F5 验证证据（2026-07-24）：
 
 - [x] softmax 权重与 V 的加权和
 - [x] 多头拼接
-- [ ] 输出投影 `O_proj`
+- [x] 输出投影 `O_proj`
 - [ ] 残差连接
 - [ ] 完整 Attention 子层与软件参考比较
 
@@ -568,7 +568,21 @@ F6 第一段验证证据（2026-07-24）：
 - 多角时序 `All Constraints Met`：慢角 setup WNS=`+0.825 ns`、TNS=0，hold WHS=`+0.112 ns`、THS=0；快角 setup WNS=`+3.349 ns`、TNS=0，hold WHS=`+0.032 ns`、THS=0；恢复和移除无违例；
 - 位流：`attention_output_f6/pnr/generate_bitstream/attention_output_top.sbit`，大小 2101696 B，SHA256=`d7e64c58b73f8ca93f7a7dd981feabe5cc48f9b43e6b2ff0d8f60155886f36a3`；
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K ATTN OUTPUT V1`，DDR3 初始化成功；
-- 本阶段严格停在 Attention 加权和与多头拼接，尚未实现 `O_proj`、Attention 残差或 MLP。
+- 第一段严格停在 Attention 加权和与多头拼接，没有提前实现 `O_proj`、Attention 残差或 MLP。
+
+F6 第二段 O_proj 验证证据（2026-07-24）：
+
+- 新增独立 `attention_oproj_f6` 工程，输入来源为第一段已经真实上板逐位通过的 `[896]` head-major signed int64 Q28 Attention 拼接结果；真实参数为 `model.layers.0.self_attn.o_proj.weight=[896,896]`、group size 64，`.p50` 中不存在 O_proj bias，因此 `bias_q28` 固定全 0；
+- Q28 输入先按实数解释并执行逐向量对称 INT8 量化，硬件继续采用每 64 元素 INT32 点积、unsigned UQ4.28 combined scale、signed int64 Q28 跨 14 group 累加；复用已验证完整 Linear controller/core，但建立独立顶层、PDS 工程、位流、软件清单和上位机，不覆盖 q_proj、F6 第一段或更早成果；
+- 四组固定输入直接复用 F6 第一段的 1、2、6、16-token 真实窗口输出；O_proj 输出 SHA256 分别为 `19008a25a59cde0f8def0c938ada397b6866dc143774b74c6ff77a2a95a7fcd5`、`0e70753bea148c81d0bce79360d250710a1cc6ee817a40e4b6cbccf7d4f30279`、`c0ffeb8b5a1168b661d52a34f34a5f4f12f3d075805b05b4ace346683cb8b018`、`af63d1efc3913f597fdcd5dbe520ac782a943074301a60b249f4f25a3cf34a65`；四组 896 个输出均真实上板逐位一致；
+- O_proj 新增单元测试 7/7 PASS，完整 `model_tools` 回归 100/100 PASS；真实参数、独立 Q28 重算、固定 488320 B 载荷往返和随机/边界软件压力 1000/1000 PASS，seed=`20260805`，约 35.26 秒；
+- 真实 FPGA 全零、随机常量、稀疏极值和完整 896 维随机 Attention Q28 输入回归 4/4 PASS，seed=`20260805`，约 172.34 秒；四组固定上传、计算和回读均约 43.03~43.04 秒；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，最终未布线网络为 0；
+- 资源：8510 LUT、7619 FF、326 个 distributed RAM、4 DRM、12 APM；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.614 ns`、TNS=0，hold WHS=`+0.171 ns`、THS=0；快角 setup WNS=`+3.023 ns`、TNS=0，hold WHS=`+0.101 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`attention_oproj_f6/pnr/generate_bitstream/attention_oproj_top.sbit`，大小 2101696 B，SHA256=`017517f877f29e62d945ecd3ae4ba22c2d690b6e6b92778eb0502ba7ac115533`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；复用通用完整 Linear 协议标识 `PANGU50K QPROJ FULL V1`，DDR3 初始化成功；
+- 当前严格停在 O_proj，尚未实现 Attention 残差、完整 Attention 子层或 MLP。
 
 ## 阶段 G：MLP 和 Transformer Block
 
@@ -773,8 +787,15 @@ F6 第一段验证证据（2026-07-24）：
 | `attention_output_f6/rtl/attention_output_core.v` | F6 DRM 概率/V 缓存、顺序 16-bit 部分积、100-bit Q59 累加、RNE 和流式输出核心 |
 | `attention_output_f6/rtl/attention_output_ctrl.v` | F6 UART、F3 V 地址读取、16-token 装载、输出 byte-enable 写回和结果回读控制器 |
 | `attention_output_f6/pnr/build_attention_output.tcl` | F6 独立 PDS 全流程构建脚本 |
-| `attention_output_f6/README.md` | F6 定点规则、协议、地址、资源、时序、位流和真实上板证据 |
-| `tools/pangu_attention_output_host.py` | F6 软件自检、真实固定/边界和随机层/窗口/概率/V 上板逐位比较工具 |
+| `attention_output_f6/README.md` | F6 加权和与多头拼接的定点规则、协议、地址、资源、时序、位流和真实上板证据 |
+| `tools/pangu_attention_output_host.py` | F6 加权和软件自检、真实固定/边界和随机层/窗口/概率/V 上板逐位比较工具 |
+| `model_tools/attention_oproj_reference.py` | F6 Q28 拼接输入量化、真实 layer0 O_proj 参数和完整 Q28 金标准 |
+| `model_tools/attention_oproj_f6_reference.json` | F6 四组真实 Attention 输入、O_proj 输出和关键数组 SHA256 清单 |
+| `model_tools/test_attention_oproj_reference.py` | F6 O_proj 输入转换、独立重算、真实参数、零输入和随机测试 |
+| `attention_oproj_f6/rtl/attention_oproj_top.v` | F6 O_proj 独立顶层，直接复用已验证完整 Linear controller/core 并保持 DDR3 约束层级 |
+| `attention_oproj_f6/pnr/build_attention_oproj.tcl` | F6 O_proj 独立 PDS 全流程构建脚本 |
+| `attention_oproj_f6/README.md` | F6 O_proj 量化规则、复用边界、时序、位流和真实上板证据 |
+| `tools/pangu_attention_oproj_host.py` | F6 O_proj 软件自检、四组真实固定和随机/边界上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -792,10 +813,10 @@ F6 第一段验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-继续 F6 Attention 输出的下一小步：基于已经真实上板逐位通过的 `[896]` Attention 多头拼接结果，
-建立真实 layer0 `self_attn.o_proj=[896,896]` 的分组 INT4 软件金标准和独立硬件闭环。优先复用已经
-验证的通用 GEMV / layer0 q_proj 数据通路，但必须新建或隔离 O_proj 验证入口，不覆盖 F6 加权和、
-F5 Softmax 或更早工程和位流。验收必须包含真实 `.p50` O_proj 参数、固定与随机逐位比较、PDS
-全流程、多角时序、JTAG SRAM 上板和压力测试。O_proj 完成后再接 Attention 残差与完整子层；
-不得提前进入 MLP。
+继续 F6 Attention 输出的唯一下一小步：把已经真实上板逐位通过的 layer0 O_proj `[896]`
+signed int64 Q28 输出，与该 Attention 子层对应的输入 hidden state 建立残差连接，并形成完整
+layer0 Attention 子层的软件参考和独立硬件闭环。必须先明确两路数据的统一定点格式、量化/重标定
+边界和 signed 饱和规则，复用已验证 `elementwise_k896` 残差能力时仍须建立隔离入口，不覆盖
+O_proj、F6 加权和或更早工程和位流。验收必须包含真实固定 hidden state、随机与饱和边界逐位比较、
+PDS 全流程、多角时序、JTAG SRAM 上板和压力测试。完整 Attention 子层通过前不得进入 MLP。
 ```

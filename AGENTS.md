@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表、F1 Q/K/V、F2 RoPE、F3 KV Cache、F4 Attention Score 和 F5 Softmax 均已完成。`softmax_f5` 已直接消费 F4 的 `[14,16]` signed Q28 score，实现 mask 感知 max、减最大值、513 点 UQ1.31 PWL exp、36 位求和、Q31 恢复除法倒数和概率归一化；完整软件回归 83/83 PASS、软件随机 1000/1000 PASS、四组真实固定窗口逐位一致、真实随机 100/100 PASS，多角时序 TNS/THS=0。下一步进入 F6 Attention 输出：消费 F5 概率和 F3 V Cache，实现 14Q/2KV GQA 的概率×V 加权和、多头拼接、O_proj 与残差；先完成独立加权和闭环，不覆盖任何已有验证工程和位流
+- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表、F1 Q/K/V、F2 RoPE、F3 KV Cache、F4 Attention Score、F5 Softmax、F6 概率×V 加权和/多头拼接和真实 layer0 O_proj 均已完成。`attention_oproj_f6` 已消费 F6 `[896]` signed int64 Q28 拼接结果，按逐向量对称 INT8 规则运行真实 `self_attn.o_proj=[896,896]` groupwise INT4 权重；完整软件回归 100/100 PASS、软件随机 1000/1000 PASS、四组真实固定输入逐位一致、真实随机/边界 4/4 PASS，多角时序 TNS/THS=0。当前唯一下一任务是建立 Attention 残差和完整 layer0 Attention 子层闭环；完整 Attention 子层通过前不得进入 MLP，也不得覆盖任何已有验证工程和位流

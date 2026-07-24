@@ -1,0 +1,330 @@
+{
+  "format_version": 1,
+  "definition": {
+    "source": "F6 real attention output fixed cases",
+    "input_format": "signed int64 Q28 [896] head-major contiguous",
+    "activation_quantization": "dequantize Q28 to float32, symmetric per-vector INT8 [-127,127], RNE, zero_point=0",
+    "weight_tensor": "model.layers.0.self_attn.o_proj.weight",
+    "weight_shape": [
+      896,
+      896
+    ],
+    "weight_storage": "signed INT4 groupwise symmetric",
+    "group_size": 64,
+    "groups_per_row": 14,
+    "combined_scale": "unsigned UQ4.28",
+    "bias": "absent in P50; bias_q28 is all zero",
+    "output_format": "signed int64 Q28 [896]",
+    "formula": "output_q28[row] = sum(group_acc_int32 * combined_scale_uq4_28)"
+  },
+  "cases": [
+    {
+      "label": "layer=0, query=0, window=0..0 -> layer0 o_proj，window=0+1",
+      "activation_scale": 0.017796844947995164,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_output_error_from_activation_quantization": 0.007387014462645891,
+      "max_fixed_scale_error": 1.4291082077177997e-05,
+      "max_fixed_error_bound": 3.576651215553284e-05,
+      "sha256": {
+        "source_attention_q28": "c5107911c0e6b9f1d9c471d7dde2c26d1192282abc964eb5005051aa5a4c9f71",
+        "activation_int8": "269aa638100209829f975d045eb3f4790af1f6118e1648fd24e24b063aa6f493",
+        "packed_weight_int4": "9ab24aa87dbcefffd541d26356d0fe4b56ac01ac9bb6ef814318ca1d2317df2e",
+        "combined_scale_uq4_28": "c4f77517197df7832535287caa8c8d58b724347b60f0030e37e2b34235f0da66",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "19008a25a59cde0f8def0c938ada397b6866dc143774b74c6ff77a2a95a7fcd5"
+      },
+      "preview": {
+        "input_first8_q28": [
+          77944436,
+          36359148,
+          64376146,
+          -246251143,
+          -200909103,
+          171029114,
+          57989570,
+          -228448240
+        ],
+        "input_last8_q28": [
+          94258574,
+          -572122053,
+          -232212615,
+          229222937,
+          447220586,
+          -184061837,
+          -179987010,
+          319322813
+        ],
+        "activation_first16_int8": [
+          16,
+          8,
+          13,
+          -52,
+          -42,
+          36,
+          12,
+          -48,
+          29,
+          -2,
+          42,
+          -16,
+          -58,
+          19,
+          -33,
+          -19
+        ],
+        "output_first8_q28": [
+          -31616991,
+          -49220068,
+          -59056609,
+          -56143668,
+          -33299718,
+          27365219,
+          64972668,
+          80871080
+        ],
+        "output_last8_q28": [
+          -1270880,
+          43095453,
+          -56522007,
+          -40087079,
+          -49366699,
+          -56207240,
+          -19012740,
+          -51289877
+        ]
+      }
+    },
+    {
+      "label": "layer=0, query=1, window=0..1 -> layer0 o_proj，window=0+2",
+      "activation_scale": 0.019941007058451494,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_output_error_from_activation_quantization": 0.011580408913365536,
+      "max_fixed_scale_error": 1.4465766615456843e-05,
+      "max_fixed_error_bound": 4.116818308830261e-05,
+      "sha256": {
+        "source_attention_q28": "14a6ee14736ed6132ea1357d3af27d55074492a727b196c33cd6905d4e1c9b02",
+        "activation_int8": "52786927db55b59b4c7cd0b73198ef81e13bf84d6b92011c31a9ddcbabd4e5c1",
+        "packed_weight_int4": "9ab24aa87dbcefffd541d26356d0fe4b56ac01ac9bb6ef814318ca1d2317df2e",
+        "combined_scale_uq4_28": "9076c5590178aa8ae7060fd95069596b16e9f542a6c3dcd05c5a5c6d2c6a34cf",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "0e70753bea148c81d0bce79360d250710a1cc6ee817a40e4b6cbccf7d4f30279"
+      },
+      "preview": {
+        "input_first8_q28": [
+          19140938,
+          -241838807,
+          33110245,
+          -78434976,
+          275664794,
+          -3348339,
+          23544928,
+          -104195061
+        ],
+        "input_last8_q28": [
+          188134524,
+          135368782,
+          -377002475,
+          652436948,
+          -674715284,
+          -161266349,
+          -300923814,
+          -29519801
+        ],
+        "activation_first16_int8": [
+          4,
+          -45,
+          6,
+          -15,
+          51,
+          -1,
+          4,
+          -19,
+          -10,
+          -46,
+          31,
+          -25,
+          -12,
+          8,
+          -74,
+          -47
+        ],
+        "output_first8_q28": [
+          528512,
+          -979925,
+          -41636384,
+          -17975208,
+          18604247,
+          91082059,
+          8368785,
+          -129899953
+        ],
+        "output_last8_q28": [
+          -160458779,
+          -42617639,
+          40334318,
+          76452887,
+          13227969,
+          1323017,
+          -24566112,
+          70121739
+        ]
+      }
+    },
+    {
+      "label": "layer=13, query=2026, window=2023..2028 -> layer0 o_proj，window=2023+6",
+      "activation_scale": 0.01804755804106945,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_output_error_from_activation_quantization": 0.010077992050879614,
+      "max_fixed_scale_error": 1.2508878121431088e-05,
+      "max_fixed_error_bound": 2.7369707822799683e-05,
+      "sha256": {
+        "source_attention_q28": "86bc89cc77d49ac9451cc2a707510df310566997faf4c76fdfa95599043c248b",
+        "activation_int8": "a5e843e700f4543776edc656b59a8d2b706a26fa10e5558c0ef6840bc6229d0c",
+        "packed_weight_int4": "9ab24aa87dbcefffd541d26356d0fe4b56ac01ac9bb6ef814318ca1d2317df2e",
+        "combined_scale_uq4_28": "ceb0e0b347edc168dbe0af0ae3d0d7c49bd6caf8506de997268e379a15396f93",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "c0ffeb8b5a1168b661d52a34f34a5f4f12f3d075805b05b4ace346683cb8b018"
+      },
+      "preview": {
+        "input_first8_q28": [
+          17177261,
+          69099436,
+          -94142541,
+          65408652,
+          37693573,
+          -9668547,
+          91229683,
+          156822497
+        ],
+        "input_last8_q28": [
+          21504214,
+          178144379,
+          -17443787,
+          -127009349,
+          -189144323,
+          375285027,
+          -323052450,
+          125478284
+        ],
+        "activation_first16_int8": [
+          4,
+          14,
+          -19,
+          14,
+          8,
+          -2,
+          19,
+          32,
+          -18,
+          10,
+          26,
+          9,
+          -13,
+          39,
+          -42,
+          11
+        ],
+        "output_first8_q28": [
+          -152290961,
+          52356198,
+          49762567,
+          6100355,
+          -54761951,
+          -49867701,
+          -18872389,
+          -73477443
+        ],
+        "output_last8_q28": [
+          8639194,
+          30391121,
+          -47247112,
+          58043477,
+          -92385359,
+          897152,
+          76283746,
+          62851466
+        ]
+      }
+    },
+    {
+      "label": "layer=27, query=16383, window=16368..16383 -> layer0 o_proj，window=16368+16",
+      "activation_scale": 0.019854990516121933,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_output_error_from_activation_quantization": 0.0279088068280009,
+      "max_fixed_scale_error": 1.0658260248257168e-05,
+      "max_fixed_error_bound": 2.203322947025299e-05,
+      "sha256": {
+        "source_attention_q28": "73e6b464b8c27e6a4d1066df5b5dade1c11c6a085a712d58dc54f6b598a0e407",
+        "activation_int8": "3eb3500fba099ee4d65d532ce6f430ee29149e742ac5cba5b73f4487957e4e5a",
+        "packed_weight_int4": "9ab24aa87dbcefffd541d26356d0fe4b56ac01ac9bb6ef814318ca1d2317df2e",
+        "combined_scale_uq4_28": "75dcb1ed49ec817da773e33acdd8a9e39978c2b1b18bc265e924fbd39583f114",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "af63d1efc3913f597fdcd5dbe520ac782a943074301a60b249f4f25a3cf34a65"
+      },
+      "preview": {
+        "input_first8_q28": [
+          -90346410,
+          -28266233,
+          -168027303,
+          -41657976,
+          -45926320,
+          -77677993,
+          -173168443,
+          50659117
+        ],
+        "input_last8_q28": [
+          -205399696,
+          -186791618,
+          -25459738,
+          -78041196,
+          164531485,
+          -93571782,
+          178553345,
+          -111003722
+        ],
+        "activation_first16_int8": [
+          -17,
+          -5,
+          -32,
+          -8,
+          -9,
+          -15,
+          -32,
+          10,
+          -46,
+          6,
+          -34,
+          -27,
+          27,
+          4,
+          -9,
+          21
+        ],
+        "output_first8_q28": [
+          127009316,
+          7503788,
+          156102586,
+          -26075476,
+          42444190,
+          80266725,
+          39014282,
+          -3537870
+        ],
+        "output_last8_q28": [
+          -56054656,
+          16155983,
+          -46363571,
+          40341035,
+          -55878953,
+          -89887216,
+          -15300403,
+          12642003
+        ]
+      }
+    }
+  ]
+}

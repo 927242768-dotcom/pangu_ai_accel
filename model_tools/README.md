@@ -114,6 +114,8 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `softmax_f5_reference.json` | F5 exp LUT、四组真实 score 概率输出和 SHA256 固定清单 |
 | `attention_output_reference.py` | F6 概率×V、14Q/2KV GQA、Q59 累加、signed RNE、饱和和 `[14,64]/[896]` 金标准 |
 | `attention_output_f6_reference.json` | F6 四组真实 F5 概率、真实 V history、完整输出和载荷 SHA256 清单 |
+| `attention_oproj_reference.py` | F6 `[896]` Q28 输入量化、真实 layer0 O_proj 参数和完整 signed int64 Q28 金标准 |
+| `attention_oproj_f6_reference.json` | F6 四组真实 Attention 输入、O_proj 输出和关键数组 SHA256 清单 |
 | `rmsnorm_fixed_reference.py` | layer0 input_layernorm 的 Q6.10、Q12.20、LUT/NR rsqrt 与硬件等价金标准 |
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
@@ -128,6 +130,7 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `test_attention_score_reference.py` | F4 GQA、RNE、1/8 缩放、causal mask、载荷和真实固定窗口测试 |
 | `test_softmax_fixed_reference.py` | F5 RNE、LUT 边界、mask、满窗口、载荷和真实固定 score 测试 |
 | `test_attention_output_reference.py` | F6 signed RNE ties、GQA、全 mask、单/满窗口、极端 V、拼接和真实清单测试 |
+| `test_attention_oproj_reference.py` | F6 O_proj 输入转换、独立 Q28 重算、真实参数、零输入和随机测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
@@ -471,3 +474,15 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - F6 新增单元测试 10/10 PASS；完整 `model_tools` 回归 93/93 PASS；
 - 软件随机 GQA、Q59、RNE、饱和、概率/V/输出载荷和 `[14,64] <-> [896]` 往返压力 1000/1000 PASS，seed=`20260804`；
 - 固定清单：`attention_output_f6_reference.json`。
+
+
+2026-07-24 建立 F6 layer0 Attention O_proj 软件参考：
+
+- 输入直接复用 F6 已验证的 `[14,64] -> [896]` head-major signed int64 Q28 Attention 拼接结果；
+- Q28 先除以 `2^28` 转为 float32，再按逐向量对称规则量化为 INT8 `[-127,127]`，zero point 为 0；
+- 真实权重为 `model.layers.0.self_attn.o_proj.weight=[896,896]` 的 groupwise symmetric signed INT4，group size 64；真实 `.p50` 中不存在 O_proj bias，因此 `bias_q28` 固定全 0；
+- combined scale 使用 unsigned UQ4.28，每组先形成 64 项 signed INT32 点积，再在 signed int64 Q28 中跨 14 group 累加；
+- 四组固定输入复用 F6 的 1、2、6、16-token 真实窗口输出，输出 SHA256 固定为 `19008a25...fcd5`、`0e70753b...0279`、`c0ffeb8b...b018`、`af63d1ef...4a65`；
+- O_proj 新增单元测试 7/7 PASS；完整 `model_tools` 回归 100/100 PASS；
+- 软件随机/边界输入、真实参数、独立重算和 488320 B 完整上传载荷压力 1000/1000 PASS，seed=`20260805`；
+- 固定清单：`attention_oproj_f6_reference.json`。
