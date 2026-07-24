@@ -391,3 +391,15 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - F1 新增单元测试 3/3 PASS；完整 `model_tools` 回归 48/48 PASS；
 - QKV 软件随机 hidden state 1000/1000 PASS，seed=`20260729`；
 - 固定清单：`qkv_layer0_reference.json`。
+
+
+2026-07-24 建立 F2 layer0 真实 Q/K RoPE 定点软件参考：
+
+- 模型配置：`head_dim=rotary_dim=64`、`rope_theta=1000000`、`max_position_embeddings=32768`；
+- Qwen2 使用 split-half `rotate_half`，即 `dim i` 与 `dim i+32` 配对，不是相邻偶奇维配对；
+- Q/K 输入输出为 signed int64 Q28，sin/cos 为 signed int32 Q1.30；
+- 两项乘积在 signed 97 bit 中先加/减，再执行一次 RNE 右移 30 位和 int64 饱和；
+- 固定位置 `[0,1,2026,32767]` 的最大绝对误差均低于 `9.294017896955e-08` 保守界；
+- F2 新增单元测试 7/7 PASS；完整 `model_tools` 回归 55/55 PASS；
+- 软件随机 Q/K 与位置压力 1000/1000 PASS，seed=`20260730`；
+- 固定清单：`rope_layer0_reference.json`。

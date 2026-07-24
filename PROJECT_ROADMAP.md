@@ -448,10 +448,26 @@ F1 验证证据（2026-07-24）：
 
 ### F2 RoPE
 
-- [ ] 生成或加载 sin/cos 表
-- [ ] 偶数/奇数维旋转
-- [ ] 支持位置索引递增
-- [ ] 定点误差验证
+- [x] 生成或加载 sin/cos 表
+- [x] 偶数/奇数维旋转
+- [x] 支持位置索引递增
+- [x] 定点误差验证
+
+F2 验证证据（2026-07-24）：
+
+- 已确认 Qwen2.5-0.5B 配置：`head_dim=rotary_dim=64`、`rope_theta=1000000`、`max_position_embeddings=32768`；
+- 已确认 Qwen2 实际 `rotate_half` 为 split-half：`dim i` 与 `dim i+32` 配对，不是相邻 `(0,1)、(2,3)` 配对；
+- 新增独立 `rope_qk_layer0` 工程，直接消费 F1 已验证的 Q=`[14,64]`、K=`[2,64]` head-major signed int64 Q28 输出；
+- sin/cos 使用 signed Q1.30；四个 64×32 乘积精确计算，两项乘积先在 signed 97 bit 中加/减，再执行一次 RNE 右移 30 位并显式饱和到 signed int64 Q28；
+- 固定位置 `[0,1,2026,32767]` 的 Q/K 全输出真实上板逐位一致；位置 2026 的 Q/K SHA256 分别为 `6c266ff09ef200af907da2796b8fb1db4e5c050f0cad15ccb62e318a5953b0d6`、`0f8625c3063eb62726c7b3bfc933af4d70652014cd4b63a0ba772916a4c02622`；
+- 连续位置 `2026..2033` 自动递增 8/8 PASS，位置表结束状态正确，`Z` 复位后首位置重放逐位一致；
+- F2 新增单元测试 7/7 PASS，完整 `model_tools` 回归 55/55 PASS；软件随机 Q/K 与位置压力 1000/1000 PASS，seed=`20260730`；
+- 真实 FPGA 随机位置回归 300/300 PASS，seed=`20260731`，约 235.59 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成成功，最终未布线网络为 0；
+- 资源：8859 LUT、9886 FF、70 个 distributed RAM、1 APM、0 DRM；
+- 多角时序 `All Constraints Met`：慢角 setup WNS=`+0.988 ns`、TNS=0，hold WHS=`+0.171 ns`、THS=0；快角 setup WNS=`+3.483 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`rope_qk_layer0/pnr/generate_bitstream/rope_qk_top.sbit`，SHA256=`25396ffc894abc15b81ab99f62619f3694e7e662f620f3c6a89e28ae116d153a`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K ROPE QK V1`，DDR3 初始化成功。
 
 ### F3 KV Cache
 
@@ -651,6 +667,14 @@ F1 验证证据（2026-07-24）：
 | `qkv_linear_layer0/pnr_seed5/run_seed5.tcl` | F1 时序全通过的 seed5/11 独立 PDS 全流程构建脚本 |
 | `qkv_linear_layer0/README.md` | F1 量化定义、协议、GQA 布局、时序、位流和真实上板证据 |
 | `tools/pangu_qkv_linear_host.py` | F1 Q/K/V 软件自检、固定和随机 hidden state 上板逐位比较工具 |
+| `model_tools/rope_fixed_reference.py` | F2 Qwen2 split-half RoPE、Q28/Q1.30、RNE、误差界和位置表金标准 |
+| `model_tools/rope_layer0_reference.json` | F2 固定位置、真实 Q/K 输出和关键数组 SHA256 清单 |
+| `model_tools/test_rope_fixed_reference.py` | F2 配置、配对规则、RNE、载荷、真实模型和随机压力测试 |
+| `rope_qk_layer0/rtl/rope_pair_q28_core.v` | F2 16 位 limb 顺序乘法、97 位旋转、RNE 和饱和核心 |
+| `rope_qk_layer0/rtl/rope_qk_ctrl.v` | F2 UART、DDR3、连续位置表、Q/K head-major 调度和结果回读控制器 |
+| `rope_qk_layer0/pnr/build_rope_qk.tcl` | F2 独立 PDS 全流程构建脚本 |
+| `rope_qk_layer0/README.md` | F2 数学定义、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_rope_qk_host.py` | F2 软件自检、固定位置、自动递增和随机位置上板比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -668,9 +692,9 @@ F1 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 F2 RoPE：基于 F1 已验证的 Q=[14,64]、K=[2,64] head-major Q28 输出，先确认
-Qwen2.5-0.5B 的 rotary_dim、rope_theta、位置索引和偶奇维配对规则，建立真实 layer0 Q/K
-软件参考与固定清单。随后设计独立 RoPE 定点工程，完成 sin/cos 表生成或加载、位置索引递增、
-Q/K 偶数/奇数维旋转、定点格式转换和误差界验证，并执行软件压力、PDS、多角时序、真实上板
-固定与随机位置测试。不得覆盖 F1 及更早阶段的验证工程和位流。
+进入 F3 KV Cache：基于 F2 已验证的 Q/K RoPE 输出和模型 28 层、2 个 KV heads、head_dim=64，
+先定义 1 GiB DDR3 中每层、每个 token 的 K/V Cache 地址布局、容量公式和上下文长度边界。
+随后建立软件地址参考与固定清单，新建独立 KV Cache 工程，完成当前 token K/V 写入、历史 token
+顺序读取、位置索引推进、层间/token 间防覆盖和越界错误处理，并执行软件压力、PDS、多角时序、
+真实上板固定与随机层/位置测试。不得覆盖 F2 及更早阶段的验证工程和位流。
 ```

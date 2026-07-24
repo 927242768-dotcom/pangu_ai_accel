@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表和 F1 Q/K/V 线性层均已完成。`qkv_linear_layer0` 已真实上板统一运行 layer0 `q_proj=[896,896]`、`k_proj=[128,896]`、`v_proj=[128,896]`，完成逐组 UQ4.28、signed int64 Q28、14 Q heads/2 KV heads/head_dim 64 的 GQA head-major 布局；固定 Q/K/V 全输出逐位一致，软件随机 1000/1000 PASS，真实随机完整 Q+K+V 3/3 PASS，seed5/11 多角时序 TNS/THS=0。下一步进入 F2 RoPE：基于已验证 Q/K head 布局建立 sin/cos、位置索引、偶奇维旋转和定点误差闭环，不覆盖任何已有验证工程和位流
+- 当前阶段：D1.3 GEMV 性能基础设施、D2 真实 Linear、E1 RMSNorm、E2 元素级运算、E3 Embedding/查表、F1 Q/K/V 线性层和 F2 RoPE 均已完成。`rope_qk_layer0` 已真实上板运行 layer0 Q=`[14,64]`、K=`[2,64]` 的 Qwen2 split-half RoPE，确认 `dim i` 与 `dim i+32` 配对、`rope_theta=1000000`、signed Q28/Q1.30、位置自动递增；固定位置全输出逐位一致，软件随机 1000/1000 PASS，真实随机位置 300/300 PASS，多角时序 TNS/THS=0。下一步进入 F3 KV Cache：先定义 28 层、2 个 KV heads、head_dim 64 和 token 位置对应的 DDR3 地址布局、容量边界、写入/历史读取和防覆盖闭环，不覆盖任何已有验证工程和位流

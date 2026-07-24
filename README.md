@@ -17,10 +17,11 @@
 11. [`elementwise_k896/README.md`](elementwise_k896/README.md)：已验证的 K=896 残差、缩放、元素乘法和 PWL64 SiLU 闭环。
 12. [`embedding_k896/README.md`](embedding_k896/README.md)：已验证的真实 tied Embedding Token 行地址、INT4/UQ4.28 到 Q6.10 闭环。
 13. [`qkv_linear_layer0/README.md`](qkv_linear_layer0/README.md)：已验证的真实 layer0 Q/K/V、GQA head-major 布局和统一 Q28 闭环。
+14. [`rope_qk_layer0/README.md`](rope_qk_layer0/README.md)：已验证的 Qwen2 split-half Q/K RoPE、位置递增和 Q28/Q1.30 闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding 和完整 Q/K/V 的多级计算闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V 和 RoPE 的多级计算闭环：
 
 ```text
 长度16单点积：
@@ -54,13 +55,15 @@ E3 Embedding/查表现已完成。独立工程 `embedding_k896` 对真实 tied `
 
 F1 Q/K/V 线性层现已完成。独立工程 `qkv_linear_layer0` 统一运行真实 layer0 `q_proj=[896,896]`、`k_proj=[128,896]`、`v_proj=[128,896]`，共用逐向量对称 INT8 hidden state、UQ4.28 combined scale 和 signed int64 Q28 数据通路；输出按 Q=`[14,64]`、K/V=`[2,64]` 的 head-major GQA 布局排列。固定 Q/K/V 全输出均与 Python 逐位一致；完整软件回归 `48/48 PASS`，QKV 软件随机 `1000/1000 PASS`，真实上板随机完整 Q+K+V `3/3 PASS`。seed5/11 PDS 全流程和所有角时序通过，慢角 setup WNS=`+0.363 ns`、TNS=0、hold WHS=`+0.169 ns`、THS=0；位流 SHA256=`e3a4b6849a5716f38d6bdd3fbd039d46f2d350a32a0417ee347462d1a8f96e26`。
 
+F2 RoPE 现已完成。独立工程 `rope_qk_layer0` 对 F1 真实 Q=`[14,64]`、K=`[2,64]` 执行 Qwen2 split-half 旋转：`dim i` 与 `dim i+32` 配对，`rope_theta=1000000`，Q/K 为 signed Q28，sin/cos 为 signed Q1.30；四个乘积精确重构后在 97 位中加减并单次 RNE。固定位置 `[0,1,2026,32767]` 的 Q/K 全输出逐位一致，连续位置 `2026..2033` 自动递增和复位重放通过；完整软件回归 `55/55 PASS`，软件随机 `1000/1000 PASS`，真实上板随机位置 `300/300 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.988 ns`、TNS=0、hold WHS=`+0.171 ns`、THS=0；位流 SHA256=`25396ffc894abc15b81ab99f62619f3694e7e662f620f3c6a89e28ae116d153a`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 F2 RoPE：在 F1 已验证的 Q=[14,64]、K=[2,64] head-major Q28 输出基础上，
-确认 rotary_dim、rope_theta、位置索引和偶奇维配对规则，建立真实 Q/K 软件参考与固定清单；
-再新建独立 RoPE 定点工程，完成 sin/cos 表、位置递增、Q/K 旋转、格式转换、误差验证、
-软件压力、PDS、多角时序以及真实上板固定和随机位置测试。不得覆盖已有验证工程和位流。
+进入 F3 KV Cache：基于 F2 已验证的 Q/K RoPE 输出，先定义 28 层、2 个 KV heads、
+head_dim=64、token 位置对应的 DDR3 地址布局、容量公式和上下文边界；再新建独立工程，
+完成当前 token K/V 写入、历史 token 顺序读取、位置推进、层间/token 间防覆盖和越界处理，
+并执行软件压力、PDS、多角时序以及真实上板固定和随机层/位置测试。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

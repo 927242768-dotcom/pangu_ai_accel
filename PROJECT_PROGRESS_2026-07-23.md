@@ -741,9 +741,59 @@ v_proj.weight = [128,896] ->  2 V heads × 64
 - JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
 - 固件：`PANGU50K QKV LINEAR V1`，DDR3 初始化成功。
 
-## 十六、当前项目状态
+## 十六、F2 layer0 Q/K RoPE 已完成（2026-07-24）
 
-当前已经完成十级真实闭环：
+新增文件：
+
+```text
+model_tools/rope_fixed_reference.py
+model_tools/rope_layer0_reference.json
+model_tools/test_rope_fixed_reference.py
+rope_qk_layer0/rtl/rope_pair_q28_core.v
+rope_qk_layer0/rtl/rope_qk_ctrl.v
+rope_qk_layer0/rtl/rope_qk_top.v
+rope_qk_layer0/pnr/build_rope_qk.tcl
+rope_qk_layer0/pnr/program_sram.tcl
+rope_qk_layer0/README.md
+tools/pangu_rope_qk_host.py
+```
+
+模型配置和数学规则：
+
+```text
+head_dim = rotary_dim = 64
+rope_theta = 1000000
+max_position_embeddings = 32768
+Q = [14,64] signed int64 Q28
+K = [2,64] signed int64 Q28
+sin/cos = signed int32 Q1.30
+```
+
+已核对 Qwen2 实际 `rotate_half`：每个 head 的前 32 维与后 32 维配对，即 `dim i <-> dim i+32`，而不是相邻 `(0,1)、(2,3)` 配对。硬件对四个 64×32 乘积进行精确计算，在 signed 97 bit 中完成两项加/减，最后执行一次 RNE 右移 30 位并饱和到 signed int64 Q28。
+
+首版直接 64×32 组合乘法虽能生成位流，但慢角 setup 为 `WNS=-2.017 ns`、`TNS=-254.708 ns`，未作为有效成果。最终将乘法拆为 8 个 16×16 limb 部分积并顺序复用一个 APM，同时将 97 位 combine、绝对值、RNE 和饱和分级寄存，完成时序收敛。
+
+验证结果：
+
+- 固定位置 `[0,1,2026,32767]` 的真实 Q/K 软件参考与清单建立完成；
+- 固定位置最大绝对误差为 `0`、`5.453485130147e-08`、`4.564708433463e-08`、`7.232674192892e-08`，均低于 `9.294017896955e-08` 保守界；
+- F2 新增单元测试 7/7 PASS；完整 `model_tools` 回归 55/55 PASS；
+- 软件随机 Q/K 与位置压力 1000/1000 PASS，seed=`20260730`；上位机软件自检 1000/1000 PASS，seed=`20260731`；
+- 固定位置 `0、1、2026、32767` 真实上板 Q/K 全输出逐位一致；
+- 连续位置 `2026..2033` 自动递增 8/8 PASS，结束状态正确，`Z` 复位后位置 2026 重放逐位一致；
+- 真实随机位置上板回归 300/300 PASS，seed=`20260731`，约 235.59 秒；
+- PDS 编译、综合、Device Map、布局布线、时序分析和位流生成全部成功，未布线网络为 0；
+- 资源：8859 LUT、9886 FF、70 个 distributed RAM、1 APM、0 DRM；
+- 多角时序：`All Constraints Met`；慢角 setup WNS=`+0.988 ns`、TNS=0，hold WHS=`+0.171 ns`、THS=0；快角 setup WNS=`+3.483 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；
+- 恢复、移除和最小脉宽均无违例；
+- 位流：`rope_qk_layer0\pnr\generate_bitstream\rope_qk_top.sbit`；
+- 位流 SHA256：`25396ffc894abc15b81ab99f62619f3694e7e662f620f3c6a89e28ae116d153a`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K ROPE QK V1`，DDR3 初始化成功。
+
+## 十七、当前项目状态
+
+当前已经完成十一级真实闭环：
 
 ```text
 长度16单点积
@@ -756,34 +806,34 @@ v_proj.weight = [128,896] ->  2 V heads × 64
 → K896 残差、缩放、元素乘法和 PWL64 SiLU 闭环
 → 真实 tied Embedding Token 行查表与 Q6.10 格式转换闭环
 → 真实 layer0 Q/K/V 与 14Q/2KV GQA head-major 布局闭环
+→ 真实 layer0 Q/K Qwen2 split-half RoPE、位置递增和 Q28/Q1.30 闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、动态 896/128 行调度、GQA head 布局、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、动态 896/128 行调度、GQA head 布局、Qwen2 split-half RoPE、位置表自动推进、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 RoPE、KV Cache、Attention、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 KV Cache、Attention、MLP、Transformer Block 和文本生成。
 
-## 十七、下一阶段路线
+## 十八、下一阶段路线
 
-### 当前唯一下一步：F2 RoPE
+### 当前唯一下一步：F3 KV Cache
 
-1. 基于 F1 已验证的 Q=`[14,64]`、K=`[2,64]` head-major Q28 输出，确认模型的 `rotary_dim`、`rope_theta`、位置索引和偶奇维配对规则。
-2. 建立真实 layer0 Q/K 的 RoPE 软件参考、定点格式、固定位置清单和可量化误差界。
-3. 新建独立 RoPE 工程，支持 sin/cos 表生成或加载、位置索引递增以及 Q/K 偶数/奇数维旋转。
-4. 完成固定与随机 Q/K、多个位置索引的 Python 逐元素比较。
-5. 完成软件压力、PDS 全流程、多角时序、真实上板和随机位置压力验证。
-6. 不覆盖 F1 及任何更早阶段的验证工程和位流。
+1. 基于 F2 已验证的 RoPE 后 K/V 布局，确认模型 28 层、2 个 KV heads、head_dim 64 和目标上下文长度对应的容量需求。
+2. 定义 1 GiB DDR3 中每层、每个 token 的 K/V Cache 地址公式、对齐方式、分区边界和防覆盖规则。
+3. 建立 KV Cache 软件地址参考、固定清单和越界测试。
+4. 新建独立 KV Cache 工程，完成当前 token K/V 写入、历史 token 顺序读取和位置索引推进。
+5. 完成随机层、随机 token 位置、上下文边界和层间/token 间防覆盖验证。
+6. 完成软件压力、PDS 全流程、多角时序、真实上板和随机压力验证，不覆盖 F2 及更早阶段工程和位流。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. RoPE。
-2. KV Cache。
-3. Attention Score 与 Softmax。
-4. Attention 输出。
-5. MLP。
-6. Transformer Block。
-7. 完整模型权重加载与分层调度。
-8. tokenizer、采样与文本推理验证。
+1. KV Cache。
+2. Attention Score 与 Softmax。
+3. Attention 输出。
+4. MLP。
+5. Transformer Block。
+6. 完整模型权重加载与分层调度。
+7. tokenizer、采样与文本推理验证。
 
 每一步都应保留“FPGA 结果与 Python 参考逐元素自动比较”的闭环，避免直接跳到完整模型后难以定位错误。
