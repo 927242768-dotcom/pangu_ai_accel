@@ -1348,3 +1348,100 @@ G1 `SiLU(gate)` 至此完整通过，允许进入 `SiLU(gate) × up`。
 3. 建立四组连贯真实输入、随机/边界软件参考、固定清单和上传载荷往返校验。
 4. 建立独立硬件流式调度，完成 PDS 全流程、多角时序、JTAG SRAM 和真实板卡逐位压力验证。
 5. `SiLU(gate) × up` 单独全部通过前不得进入 down projection。
+
+
+## 三十、G1 `SiLU(gate) × up` 独立真实闭环已完成（2026-07-25）
+
+本轮严格执行路线图的唯一下一任务，只完成 layer0 MLP `SiLU(gate) × up`，没有进入
+`down_proj`、MLP 残差或完整 Transformer Block。
+
+输入来源与数值规则：
+
+- SiLU 输入直接复用 `mlp_silu_g1` 已真实上板逐位通过的 `[4864]` signed int16 Q6.10；
+- up 输入直接复用 `mlp_gate_up_g1` 已真实上板逐位通过的 `[4864]` signed int64 Q28；
+- 每项完整执行 signed 16×64 乘法，保留 signed 80 bit Q38；
+- 对乘积绝对值执行 round-to-nearest-even 右移 10 位，再恢复符号；
+- 最终显式饱和到 signed int64，输出保持 Q28，后续可直接作为 `down_proj` 输入；
+- 不允许任何隐含截断；Python 使用任意精度整数路径独立确认 80 位边界。
+
+软件与固定清单：
+
+- 新增 `model_tools/mlp_silu_up_mul_reference.py`、`model_tools/mlp_silu_up_mul_g1_reference.json` 和 7 项单元测试；
+- 四组 query/count=`0/1、1/2、5/6、15/16` 的完整输出 SHA256 分别为：
+  - `278ceccc804b8f74266b6000745c1ae21d09cf47ba19041ff13cb5cbdaeac0ca`
+  - `96e1191832febbb2bf246918e489725094567811869ab85bf8452ee8e6520fa9`
+  - `9f01a9589fc9ee4f8b33acd9a64b8a767b37bee8f788697f0043ac395c7a28dc`
+  - `297b982da2fb3ee7bd9202cd8d655dec200a9e19fee9a8c614e2e5412ae97802`
+- 上传载荷为 48640 B：9728 B SiLU Q6.10 + 38912 B up Q28；结果为 38912 B signed Q28；
+- 新增测试 7/7 PASS；完整 `model_tools` 回归 130/130 PASS；
+- 软件固定清单、载荷往返和随机/边界压力 1000/1000 PASS，seed=`20260815`；
+- 覆盖全零、正负 RNE half-way tie、真实范围、稀疏、完整 int16/int64 bit pattern、
+  `INT64_MIN/MAX`、完整 80 位乘积和正负饱和；
+- 上位机 `tools/pangu_mlp_silu_up_mul_host.py` 支持同一 seed 的 `--start-index` 分批连续回归。
+
+RTL、DDR3 与协议：
+
+- 新增独立 `mlp_silu_up_mul_g1` 工程，未修改任何已有验证工程或位流；
+- `mlp_silu_up_mul_core.v` 使用一个 304×256 SiLU 缓存和四个 304×256 up bank；
+- 单个 16×16 无符号乘法器分四个 16-bit limb 精确重构完整 80-bit 乘积；
+- RNE、符号恢复和 int64 饱和均为显式硬件状态；每 4 个 int64 打包为一个 256-bit result beat；
+- `mlp_silu_up_mul_ctrl.v` 实现 UART、48640 B 上传、DDR3 burst、片上缓存装载、
+  1216 个结果 beat 流式写回和 38912 B 回读；
+- DDR3 Controller 32-bit 地址基址：SiLU=`0x0000000`、up=`0x0001000`、result=`0x0004000`；
+- 固件命令 `I/S/L/G`；固件标识 `PANGU50K MLP SILUUP V1`。
+
+PDS 与位流：
+
+- 默认 PnR 完成 Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream，
+  但 Fast Corner core hold 有一条 `-0.005 ns`，不作为验收版本；
+- 独立 seed17/29 重新完成全流程，最终未布线网络为 0，`Design Summary: All Constraints Met`；
+- 资源：7895 LUT、6910 FF、70 distributed RAM、40 DRM、1 APM、79 IO；
+- 慢角 core setup WNS=`+0.511 ns`、TNS=0，hold WHS=`+0.141 ns`、THS=0；
+- 快角 core setup WNS=`+3.050 ns`、TNS=0，hold WHS=`+0.065 ns`、THS=0；
+- Slow/Fast recovery、removal 和 minimum pulse width 无违例；
+- 验收位流：`mlp_silu_up_mul_g1\pnr_seed17\generate_bitstream\mlp_silu_up_mul_top.sbit`；
+- 位流大小 2101696 B；SHA256=`a83797a8b2ec75d030fc01144e6bf51e7de0ec930fc135c1a0aba89ebf1c4336`。
+
+真实上板：
+
+- 仅通过 JTAG 下载到 FPGA 易失性 SRAM，识别器件 `PGL50H`；
+- program 成功，`done bit=1`，未执行任何 Flash 擦除或写入；
+- COM20 固件标识正确，DDR3 初始化成功；
+- 四组连贯真实固定输入均为 4864/4864 上板逐位一致，四个 SHA256 与清单完全相同，
+  合计耗时 30.55 秒；
+- 同一固定 seed=`20260815` 的连续随机序列分四批执行，范围为 1..25、26..50、51..75、76..100；
+- 真实 FPGA 随机/边界累计 100/100 PASS，每组 4864 项均与 Python 任意精度金标准逐位一致；
+- 已达到 AGENTS.md 规定的至少 100 组随机/边界真实板卡压力门槛。
+
+G1 `SiLU(gate) × up` 至此完整通过，允许进入独立 `down_proj`。
+
+## 三十一、最新项目状态与唯一下一任务
+
+当前已完成二十一级真实闭环，在完整 layer0 Attention 子层之后形成：
+
+```text
+完整 Attention 子层 signed Q6.10 输出
+→ 真实 layer0 post_attention_layernorm
+→ 共享 INT8 激活
+├─ 真实 gate_proj [4864] signed int64 Q28
+│  └─ Q28→Q6.10 signed RNE + PWL64 SiLU
+│     └─ SiLU(gate) [4864] signed Q6.10
+└─ 真实 up_proj [4864] signed int64 Q28
+
+SiLU(gate) Q6.10 × up_proj Q28
+→ 完整 signed 80-bit Q38 乘积
+→ 对称 RNE >> 10 + int64 饱和
+→ MLP 中间结果 [4864] signed int64 Q28
+```
+
+当前仍不是完整 Qwen 推理；尚未完成 down projection、第二处残差，亦未完成完整 MLP、
+Transformer Block、全模型分层调度、LM Head 和文本生成。
+
+### 当前唯一下一任务：G1 `down_proj`
+
+1. 输入必须直接来自已经真实上板逐位通过的 `SiLU(gate) × up` `[4864]` signed int64 Q28。
+2. 读取真实 `model.layers.0.mlp.down_proj.weight`，shape=`[896,4864]`、group size 64 的对称 signed INT4 参数，并确认 bias 是否存在。
+3. 首先冻结 Q28 到逐向量 INT8 激活量化、UQ4.28 combined scale、每 64 元素点积、76 groups 跨组累加、输出 Q28/bias 和显式饱和规则。
+4. 建立四组连贯真实输入、随机/边界软件参考、固定清单和完整上传载荷往返校验。
+5. 建立独立硬件流式调度，完成 PDS 全流程、多角时序、JTAG SRAM 和真实板卡逐位压力验证。
+6. `down_proj` 单独全部通过前不得进入 MLP 残差或完整 MLP。

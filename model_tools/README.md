@@ -124,6 +124,8 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `elementwise_k896_reference.json` | E2 固定边界向量、SiLU 全输入域误差和关键数组 SHA256 |
 | `mlp_silu_reference.py` | G1 gate Q28→Q6.10 signed RNE、显式饱和、PWL64 `SiLU(gate)` 和载荷金标准 |
 | `mlp_silu_g1_reference.json` | G1 四组真实 `SiLU(gate)` 完整输出、PWL 端点和上传载荷 SHA256 清单 |
+| `mlp_silu_up_mul_reference.py` | G1 `SiLU(gate) × up` 完整 signed 80-bit Q38 乘积、RNE 和 int64 饱和金标准 |
+| `mlp_silu_up_mul_g1_reference.json` | G1 四组真实逐元素乘法完整输出和 48640 B 载荷 SHA256 清单 |
 | `embedding_fixed_reference.py` | E3 Token 行地址、真实 packed INT4/FP16 scale 到 UQ4.28/Q6.10 的硬件等价参考 |
 | `embedding_k896_reference.json` | E3 固定 Token 的地址、载荷、输出范围和 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
@@ -139,6 +141,7 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 | `test_mlp_silu_reference.py` | G1 Q28 RNE tie、INT64 极值、尾部、饱和、载荷和四组真实 gate 测试 |
+| `test_mlp_silu_up_mul_reference.py` | G1 正负 RNE half-way tie、完整 80 位乘积、双向饱和、载荷和真实输入测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
 
 ## 6. 常用命令
@@ -541,3 +544,14 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 新增单元测试 7/7 PASS；完整 `model_tools` 回归 123/123 PASS；
 - 软件随机/边界压力 1000/1000 PASS，seed=`20260809`，覆盖全零、`INT64_MIN/MAX`、RNE tie、`±8` 尾部、int16 饱和边界、稀疏、一般范围和完整随机 int64 bit pattern；
 - 固定清单：`mlp_silu_g1_reference.json`；上位机：`../tools/pangu_mlp_silu_host.py`；独立工程说明：`../mlp_silu_g1/README.md`。
+
+
+2026-07-25 建立 G1 layer0 MLP `SiLU(gate) × up` 真实逐元素乘法软件参考：
+
+- 两路输入分别直接复用已经真实上板逐位通过的 `SiLU(gate)` `[4864]` signed int16 Q6.10 与 `up_proj` `[4864]` signed int64 Q28，query/count 为 `0/1`、`1/2`、`5/6`、`15/16`；
+- 每项完整执行 signed 16×64 乘法并保留 signed 80 bit Q38；对绝对值执行 RNE 右移 10 位，恢复符号后显式饱和到 signed int64，输出保持 Q28；
+- 四组结果 SHA256 为 `278ceccc...c0ca`、`96e11918...0fa9`、`9f01a958...28dc`、`297b982d...7802`；固定真实范围没有触发 int64 饱和；
+- 固定上传载荷为 48640 B：9728 B SiLU Q6.10 与 38912 B up Q28；结果为 38912 B signed Q28；
+- 新增单元测试 7/7 PASS；完整 `model_tools` 回归 130/130 PASS；
+- 软件随机/边界压力 1000/1000 PASS，seed=`20260815`，覆盖全零、正负 RNE half-way tie、真实范围、稀疏、完整 int16/int64 bit pattern、`INT64_MIN/MAX` 和正负饱和；
+- 固定清单：`mlp_silu_up_mul_g1_reference.json`；上位机：`../tools/pangu_mlp_silu_up_mul_host.py`；独立工程说明：`../mlp_silu_up_mul_g1/README.md`。
