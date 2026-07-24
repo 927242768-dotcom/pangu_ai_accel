@@ -1,8 +1,8 @@
 # 盘古 50K AI 大模型 FPGA 项目进展
 
-> 本文件记录截至 2026-07-23 的历史验证证据。后续任务状态和当前下一步统一以 `PROJECT_ROADMAP.md` 为准。
+> 本文件记录截至 2026-07-24 的历史验证证据。后续任务状态和当前下一步统一以 `PROJECT_ROADMAP.md` 为准。
 
-更新时间：2026-07-23
+更新时间：2026-07-24
 
 ## 一、`E:\50K` 文件夹概况
 
@@ -395,33 +395,77 @@ bias：model.layers.0.self_attn.q_proj.bias
 - 完整 NPZ 可由真实 `.p50` 镜像确定性重建；
 - 本轮未修改 FPGA RTL、PDS 工程或任何已验证位流。
 
-## 十、当前项目状态
+## 十、2026-07-24 新完成：D2 真实分组 UQ4.28 FPGA 小闭环
 
-当前已经完成四级真实闭环：
+新增独立工程与工具：
+
+```text
+gemv_int4_group_q28/rtl/int8_dot16_pipe.v
+gemv_int4_group_q28/rtl/gemv_group_q28_core.v
+gemv_int4_group_q28/rtl/gemv_group_q28_ctrl.v
+gemv_int4_group_q28/rtl/gemv_group_q28_top.v
+gemv_int4_group_q28/pnr/build_gemv_group_q28.tcl
+gemv_int4_group_q28/pnr/program_sram.tcl
+gemv_int4_group_q28/README.md
+tools/pangu_gemv_group_q28_host.py
+```
+
+固定验收对象仍为 layer0 `q_proj` 前 4 行、完整 K=896 输入，共 14 个 64 元素 group。固定 UART 载荷共 2976 B，包含激活、packed INT4 权重、逐行 UQ4.28 combined scale 和 signed int64 bias_q28。
+
+硬件计算流程：
+
+```text
+每组 4 次流水 MAC16
+→ signed INT32 group 点积
+→ signed INT32 × unsigned UQ4.28
+→ signed INT64 Q28 跨 14 组累加
+→ 加 bias_q28
+→ 4 个 signed int64 写回 DDR3 并经 UART 返回
+```
+
+验证结果：
+
+- Python 载荷往返与精确定点参考：1000/1000 PASS，seed=`20260724`；
+- 固定真实向量 FPGA 输出：`[207253689, -173360554, 287606739, -223225713]`，逐位一致；
+- scale bit31 和 `0xFFFFFFFF` 边界向量：PASS；
+- 随机分组 scale 真实上板压力测试：1000/1000 PASS，seed=`20260724`；
+- PDS 编译、综合、Device Map、布局布线、时序、位流生成全部成功；
+- 最终未布线网络：0；
+- 慢角 100 MHz 建立 WNS=`+0.909 ns`、TNS=0，保持 WHS=`+0.111 ns`、THS=0；
+- 快角建立 WNS=`+3.041 ns`、TNS=0，保持 WHS=`+0.051 ns`、THS=0；
+- 资源：8379 LUT、7492 FF、4 DRM、12 APM；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 位流 SHA256：`d8c7d194d4d8ce1e5d189df39fae5fc904030fe4be6e981a5876a4df73ea17bd`。
+
+首版组合 MAC16 在慢角有 WNS=`-0.109 ns`、TNS=`-0.163 ns` 的 2 个违例端点。改为显式平衡流水归约后，最终报告为 `All Constraints Met`。
+
+## 十一、当前项目状态
+
+当前已经完成五级真实闭环：
 
 ```text
 长度16单点积
 → 固定 M=4、K=64 packed INT4 GEMV
 → 运行时参数化 M/K、尾块屏蔽的通用 packed INT4 GEMV
 → GEMV 周期计数、带宽、GMAC/s、利用率和瓶颈分析
+→ 真实 q_proj M4K896 分组 UQ4.28 signed INT64 Q28 小闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、MAC16 分块循环、跨块 INT32 累加、自动地址调度、输出批量回写、性能计数和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、自动地址调度、结果写回和 Python 自动验证可以协同工作。
 
-当前 FPGA 数据通路仍是通用自定义 INT4 GEMV，不是完整 Qwen 推理；真实模型的 group scale、激活格式、UQ4.28 定点公式和固定测试向量已在 Python 侧确认，但尚未接入 FPGA GEMV。
+当前仍不是完整 Qwen 推理；真实 q_proj 只完成前 4 个输出行，尚未完成一个完整 Linear 层。
 
-## 十一、下一阶段路线
+## 十二、下一阶段路线
 
-### 当前唯一下一步：D2 真实分组定点缩放 FPGA 小闭环
+### 当前唯一下一步：D2 完整真实 Linear 层
 
-1. 新建独立工程，不覆盖 `gemv_int4_param`、`gemv_int4_perf` 或已验证位流。
-2. 以 layer0 `q_proj` 的 M=4、K=896 固定向量为第一验收对象。
-3. 每个 64 元素 group 产生 INT32 点积。
-4. 读取并缓存主机预计算的 UQ4.28 combined scale。
-5. 完成有符号 64 位 Q28 乘加和 `bias_q28` 加法。
-6. 结果写回 DDR3 并通过 UART 返回。
-7. FPGA 四个 Q28 整数必须与软件参考逐位完全一致。
-8. 随后完成随机压力、PDS 全流程、多角时序和真实上板验证。
+1. 新建独立工程，不覆盖任何已验证工程和位流。
+2. 把 M4K896 小闭环扩展到 layer0 `q_proj` 全部输出行。
+3. 增加逐行 packed 权重、scale 和 bias 地址递增。
+4. 结果按行流式写回 DDR3，避免片上缓存完整输出向量。
+5. Python 从真实 `.p50` 生成完整层载荷和逐行 signed int64 Q28 金标准。
+6. 固定完整层输出必须逐元素完全一致。
+7. 随后完成随机激活回归、PDS 全流程、多角时序和真实上板验证。
 
 ### 后续算子
 

@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3 GEMV 性能基础设施已完成；D2 的 `.p50` 格式解析和真实 Linear 软件参考也已完成。激活统一为逐向量对称 INT8，组合 scale 为 UQ4.28，layer0 q_proj M=4、K=896 固定向量已验证。下一步新建独立 FPGA 工程实现每 64 元素 group 的 INT32 点积、UQ4.28 乘法与有符号 64 位 Q28 跨组累加，不覆盖已有验证工程和位流
+- 当前阶段：D1.3 GEMV 性能基础设施、D2 `.p50` 格式解析、真实 Linear 软件参考和首个真实模型 FPGA 分组 Q28 小闭环均已完成。`gemv_int4_group_q28` 已真实上板复现 layer0 q_proj 前 4 行、K=896 的固定 Q28 输出，并通过 1000 轮随机分组 scale 压力测试；多角时序 TNS=0。下一步在新的独立工程中扩展到 layer0 q_proj 完整输出行，增加逐行权重/scale/bias 调度和 signed int64 结果流式写回，不覆盖任何已有验证工程和位流

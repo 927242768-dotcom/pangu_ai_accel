@@ -11,6 +11,7 @@
 5. [`gemv_int4_param/README.md`](gemv_int4_param/README.md)：已验证的运行时 M/K、尾块屏蔽参数化 GEMV 工程。
 6. [`gemv_int4_perf/README.md`](gemv_int4_perf/README.md)：已验证的 D1.3 周期计数、带宽、GMAC/s 和利用率分析工程。
 7. [`model_tools/README.md`](model_tools/README.md)：已确认的 `.p50` 文件头、真实张量目录、INT4 格式和按名提取工具。
+8. [`gemv_int4_group_q28/README.md`](gemv_int4_group_q28/README.md)：已验证的真实 q_proj M=4、K=896 分组 UQ4.28 定点小闭环。
 
 ## 当前状态
 
@@ -34,16 +35,17 @@ DDR3写入 → 2拍×256位AXI burst读取 → INT8/INT4处理
 
 D2 的模型格式解析和真实 Linear 软件参考均已完成：真实 `.p50` 镜像的固定头、290 个张量目录、形状、偏移、长度和对齐已全量校验；外部 JSON 与镜像内嵌 JSON 逐字段完全一致。Python 工具可按张量名提取任意 INT4 行、跨 group 二维块或 FP16 数据，并返回量化值、FP16 scale 与反量化结果。
 
-真实 Linear 已统一采用逐向量对称 INT8 激活和 UQ4.28 组合 scale。layer0 `q_proj` 的 M=4、K=896 固定切片已建立 P50 浮点、量化激活浮点和硬件等价 Q28 三条参考路径；定点最大绝对误差 `3.1277186e-6`，低于理论上界 `3.8200990e-5`。原有解析和新增量化测试共 13/13 PASS，另有 1000/1000 随机软件压力测试通过。本阶段仍未修改 FPGA RTL 或已验证位流。
+真实 Linear 已统一采用逐向量对称 INT8 激活和 UQ4.28 组合 scale。layer0 `q_proj` 的 M=4、K=896 固定切片已建立 P50 浮点、量化激活浮点和硬件等价 Q28 三条参考路径；定点最大绝对误差 `3.1277186e-6`，低于理论上界 `3.8200990e-5`。原有解析和新增量化测试共 13/13 PASS，另有 1000/1000 随机软件压力测试通过。
+
+D2 的首个真实模型 FPGA 小闭环也已完成。独立工程 `gemv_int4_group_q28` 对 layer0 `q_proj` 前 4 行、完整 K=896 输入执行每 64 元素分组 INT32 点积、UQ4.28 乘法、signed INT64 Q28 跨组累加和 bias 加法。固定向量 FPGA 输出 `[207253689, -173360554, 287606739, -223225713]` 与软件参考逐位一致，scale bit31/`0xFFFFFFFF` 边界通过，随机上板 `1000/1000 PASS`。PDS 多角时序 `All Constraints Met`，慢角 100 MHz WNS=`+0.909 ns`、TNS=0；位流 SHA256=`d8c7d194d4d8ce1e5d189df39fae5fc904030fe4be6e981a5876a4df73ea17bd`。
 
 ## 当前唯一下一任务
 
 ```text
-继续 D2：新建独立 FPGA 工程，实现真实模型的分组 UQ4.28 定点缩放。
-首先复现 layer0 q_proj 的 M=4、K=896 固定向量：
-每个 64 元素 group 进行 INT4×INT8 点积，乘主机预计算的 UQ4.28 combined scale，
-在有符号 64 位 Q28 中跨组累加并加入 bias_q28，最终 4 个整数必须与软件参考逐位一致。
-随后完成随机压力、PDS 全流程、多角时序和真实上板验证。
+继续 D2：新建独立工程，把已验证的 M4K896 分组 Q28 小闭环扩展到 layer0 q_proj 完整输出行。
+增加完整输出行调度、逐行权重/scale/bias 地址递增和 signed int64 结果流式写回，
+避免在片上缓存整个输出向量。Python 从真实 .p50 生成完整层载荷和逐行 Q28 金标准，
+先完成固定完整层逐元素比较，再完成随机激活回归、PDS、多角时序和真实上板验证。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

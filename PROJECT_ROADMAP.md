@@ -2,7 +2,7 @@
 
 > 本文件是项目的**唯一权威任务清单**。后续对话和开发会话必须先读取本文件，再决定继续做什么。
 >
-> 最后更新：2026-07-23
+> 最后更新：2026-07-24
 
 ## 1. 最终目标
 
@@ -246,7 +246,7 @@ Python生成M×K INT4矩阵和K维INT8向量
 - [x] 明确每个线性层的权重形状和存储顺序
 - [x] 明确 INT4 编码方式、分组大小、scale 和 zero point
 - [x] Python 可提取任意一行/一块真实模型权重
-- [ ] FPGA GEMV 支持真实模型的分组反量化或定点缩放
+- [x] FPGA GEMV 支持真实模型的分组反量化或定点缩放
 - [x] 选择统一的激活量化格式
 - [x] 定义 scale 的定点格式，例如 Q 格式
 - [x] 验证一个真实线性层的小切片与 PyTorch/NumPy 一致
@@ -289,7 +289,28 @@ D2 真实 Linear 量化软件参考验证证据（2026-07-23）：
 - 随机软件压力测试：`1000/1000 PASS`，seed=`20260723`
 - 本阶段未修改 FPGA RTL、PDS 工程或任何已验证位流
 
-验收：至少完成模型中的一个完整 Linear 层，输出与软件量化参考一致。
+D2 真实分组 UQ4.28 FPGA 小闭环验证证据（2026-07-24）：
+
+- 新建独立工程：`gemv_int4_group_q28`，未覆盖 `gemv_int4_param`、`gemv_int4_perf` 或其已验证位流
+- 固定真实验收对象：layer0 `q_proj` 输出行 `0..3`、输入列 `0..895`，M=4、K=896、group size=64
+- UART 固定载荷共 2976 B：896 B 激活、1792 B packed INT4 权重、256 B UQ4.28 scale、32 B bias_q28
+- FPGA 每 64 元素 group 执行 4 次流水 MAC16，产生 signed INT32 group 点积
+- UQ4.28 scale 以 unsigned uint32 保存，硬件零扩展后与 signed INT32 相乘，并在 signed INT64 Q28 中跨 14 组累加
+- 4 个 signed int64 输出写回 DDR3，并通过 UART 返回 Python 逐位比较
+- Python 载荷、打包/解包和精确定点金标准：`1000/1000 PASS`，seed=`20260724`
+- 固定真实向量 FPGA 输出：`[207253689, -173360554, 287606739, -223225713]`，与软件参考逐位完全一致
+- scale bit31 和 `0xFFFFFFFF` 边界向量：真实上板 PASS
+- 随机分组 scale 真实上板压力测试：`1000/1000 PASS`，seed=`20260724`，约 266.06 秒
+- 首版组合 MAC16 慢角 WNS=`-0.109 ns`、TNS=`-0.163 ns`；改为显式平衡流水后全部修复
+- PDS 全流程成功，最终未布线网络 0；多角时序 `All Constraints Met`
+- 100 MHz 慢速角建立 WNS=`+0.909 ns`、TNS=0；保持 WHS=`+0.111 ns`、THS=0
+- 快速角建立 WNS=`+3.041 ns`、TNS=0；保持 WHS=`+0.051 ns`、THS=0
+- 资源：8379 LUT、7492 FF、4 个 DRM、12 个 APM
+- 位流：`gemv_int4_group_q28/pnr/generate_bitstream/gemv_group_q28_top.sbit`
+- SHA256：`d8c7d194d4d8ce1e5d189df39fae5fc904030fe4be6e981a5876a4df73ea17bd`
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash
+
+验收：至少完成模型中的一个完整 Linear 层，输出与软件量化参考一致。当前已完成前 4 行真实小闭环，完整 Linear 层仍未完成。
 
 ## 阶段 E：基础非矩阵算子
 
@@ -490,6 +511,8 @@ D2 真实 Linear 量化软件参考验证证据（2026-07-23）：
 | `tools/pangu_ddr_mac16_host.py` | INT8/INT4 上位机验证工具 |
 | `tools/pangu_gemv_m4k64_host.py` | M=4、K=64 GEMV 金标准与上板测试工具 |
 | `tools/pangu_gemv_param_host.py` | 参数化 GEMV 金标准、多尺寸、尾块、边界、压力测试与性能分析工具 |
+| `tools/pangu_gemv_group_q28_host.py` | 真实 q_proj M4K896 分组 UQ4.28 固定向量、载荷自检和上板压力工具 |
+| `gemv_int4_group_q28/README.md` | 分组 Q28 工程协议、地址布局、时序、位流和上板证据 |
 | `model_tools/export_qwen25_fpga.py` | 模型转换工具 |
 | `model_tools/p50_format.py` | `.p50` 固定头、目录、布局校验和按名提取解析库 |
 | `model_tools/p50_inspect.py` | `.p50` 摘要、目录查看、全量校验、行/块提取命令行工具 |
@@ -514,11 +537,11 @@ D2 真实 Linear 量化软件参考验证证据（2026-07-23）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-继续 D2：在独立工程中实现真实模型分组定点缩放的 FPGA GEMV 小闭环。
-以已确认的 layer0 q_proj M=4、K=896 固定向量为第一验收对象：
-每个 64 元素 group 产生 INT32 点积，读取/缓存主机预计算的 UQ4.28 combined scale，
-完成有符号 64 位 Q28 乘加、bias_q28 加法、DDR3 写回和 UART 返回；
-FPGA 输出必须与 model_tools/q_proj_m4k896_reference.json 中的 4 个 Q28 整数逐位完全一致。
-新建独立目录，不覆盖 gemv_int4_param、gemv_int4_perf 或其已验证位流；
-完成后再进行随机分组缩放压力测试、PDS 全流程、多角时序和真实上板验证。
+继续 D2：在新的独立工程中把已验证的 M4K896 分组 Q28 小闭环扩展为一个完整真实 Linear 层。
+第一目标为 layer0 q_proj 全部输出行：复用 K=896、group_size=64 的激活缓存、INT4 解包、
+UQ4.28 乘法和 signed INT64 Q28 累加，增加完整输出行调度、逐行 scale/bias 地址递增、
+结果流式写回 DDR3，避免在片上缓存整个输出向量。
+Python 必须从真实 .p50 确定性生成完整层输入载荷和逐行 Q28 金标准；
+先做固定完整层逐元素比较，再做随机激活回归、PDS 全流程、多角时序和真实上板验证。
+不得覆盖 gemv_int4_group_q28、gemv_int4_param、gemv_int4_perf 或任何已验证位流。
 ```
