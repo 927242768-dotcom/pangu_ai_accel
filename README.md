@@ -19,6 +19,8 @@
 13. [`qkv_linear_layer0/README.md`](qkv_linear_layer0/README.md)：已验证的真实 layer0 Q/K/V、GQA head-major 布局和统一 Q28 闭环。
 14. [`rope_qk_layer0/README.md`](rope_qk_layer0/README.md)：已验证的 Qwen2 split-half Q/K RoPE、位置递增和 Q28/Q1.30 闭环。
 15. [`kv_cache_f3/README.md`](kv_cache_f3/README.md)：已验证的 28 层、16384 token、真实 K/V 写入、历史顺序读取和防覆盖闭环。
+16. [`attention_score_f4/README.md`](attention_score_f4/README.md)：已验证的 14Q/2KV GQA Attention Score、1/8 缩放和 causal mask 闭环。
+17. [`softmax_f5/README.md`](softmax_f5/README.md)：已验证的 mask 感知 Softmax、PWL exp、Q31 倒数和概率归一化闭环。
 
 ## 当前状态
 
@@ -62,14 +64,16 @@ F3 KV Cache 现已完成。独立工程 `kv_cache_f3` 将 1 GiB DDR3 的低端 1
 
 F4 Attention Score 现已完成。独立工程 `attention_score_f4` 直接消费 F1/F2 的 Q/K Q28 输出并复用 F3 K Cache 地址；实现 64 维精确 Q56 点积、`1/sqrt(64)=1/8` 的 signed RNE 右移 31 位、`14Q -> 2KV` GQA 映射以及 `INT64_MIN` causal mask，固定输出为 `[14,16]` head-major signed int64 Q28。四组真实固定窗口和 mask/末地址边界全部逐位一致；完整软件回归 `73/73 PASS`，软件随机 `1000/1000 PASS`，真实随机层/窗口/Q/K `100/100 PASS`。PDS 所有角时序通过，慢角 core setup WNS=`+0.482 ns`、TNS=0、hold WHS=`+0.170 ns`、THS=0；位流 SHA256=`669cb5b23cb6c5d33d0003f32452e57cda251751179c318c1b5d8f2ed8c0e0f8`。
 
+F5 Softmax 现已完成。独立工程 `softmax_f5` 直接消费 F4 `[14,16]` signed Q28 score，实现 mask 感知 max、减最大值、`[-16,0]`/步长 `1/32` 的 513 点 UQ1.31 PWL exp、36 位求和、恢复除法 Q31 倒数和概率归一化；输出为 `[14,16]` unsigned UQ1.31。全 mask、单有效、部分/满窗口、全等 score 和极端差值行为均已固定。四组真实 F4 窗口上板逐位一致；完整软件回归 `83/83 PASS`，软件随机 `1000/1000 PASS`，真实随机 mask/窗口 `100/100 PASS`，最坏 float64 概率误差 `2.96390625578e-05`。PDS 所有角时序通过，慢角 setup WNS=`+0.227 ns`、TNS=0、hold WHS=`+0.143 ns`、THS=0；位流 SHA256=`d6e505ea5495c6054a447608406db0f93855ef55dbfc357c8d113b00adba34fe`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 F5 Softmax：消费 F4 已验证的 `[14,16]` signed Q28 score，先建立 mask 感知的
-max reduction、减最大值、exp 近似/查表、sum reduction、reciprocal 和归一化软件金标准，
-明确概率定点格式、RNE/饱和和数值稳定性边界；再新建独立 Softmax 工程完成固定/随机窗口、
-PDS、多角时序和真实上板逐位验证。不得提前进入 V 加权和或 F6 Attention 输出，
-且不得覆盖 F4 及更早阶段的验证工程和位流。
+进入 F6 Attention 输出：消费 F5 已验证的 `[14,16]` unsigned UQ1.31 概率和 F3 V Cache，
+先建立 14Q/2KV GQA 的概率×V 加权和软件金标准，明确 Q59 乘积、跨最多 16 token 累加、
+RNE 恢复 Q28、饱和和全 mask/单 token/满窗口边界；再新建独立工程完成 `[14,64]`
+多头结果、`[896]` 拼接、固定/随机、PDS、多角时序和真实上板逐位验证。
+不得提前进入 MLP，且不得覆盖 F5 及更早阶段的验证工程和位流。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

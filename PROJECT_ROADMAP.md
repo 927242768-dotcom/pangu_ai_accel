@@ -523,12 +523,29 @@ F4 验证证据（2026-07-24）：
 
 ### F5 Softmax
 
-- [ ] max reduction
-- [ ] 减最大值
-- [ ] exp 近似或查表
-- [ ] sum reduction
-- [ ] reciprocal/归一化
-- [ ] 长序列数值稳定性测试
+- [x] max reduction
+- [x] 减最大值
+- [x] exp 近似或查表
+- [x] sum reduction
+- [x] reciprocal/归一化
+- [x] 长序列数值稳定性测试
+
+F5 验证证据（2026-07-24）：
+
+- 新增独立 `softmax_f5` 工程，直接消费 F4 的 `[14,16]` head-major signed int64 Q28 score；`INT64_MIN` mask 槽严格输出概率 0，全 mask head 输出全 0；
+- 概率格式确定为 unsigned UQ1.31 uint32，`1.0=0x80000000`；单有效 token 精确输出 1.0，相同 16 个有效 score 精确输出 16 个 `0x08000000`；
+- 每 head 先执行 mask 感知 max reduction 和减最大值；exp 使用 `[-16,0]`、步长 `1/32` 的 513 点 UQ1.31 端点 LUT，区间内线性插值，差值小于 `-16` 时尾部置 0；
+- 最多 16 项 exp 使用 36 位和；倒数为 `RNE(2^62/sum_exp_q31)`，概率为 `RNE(exp_q31*reciprocal_q31/2^31)` 并限制到 `[0,1.0]`；
+- 插值乘法按 26 位相邻 LUT 差值拆成四个 13×12/11 部分积和两级加法流水；概率乘法前增加 exp 选择寄存，修复 100 MHz 慢角时序；
+- F5 新增单元测试 10/10 PASS，完整 `model_tools` 回归 83/83 PASS；软件随机 mask、窗口、极端差值和载荷压力 1000/1000 PASS，seed=`20260803`，最坏 float64 概率误差 `3.04973546883e-05`；
+- 四组真实 F4 固定 score 全部上板逐位一致，概率 SHA256 分别为 `768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608`、`021ac6fad9854aeede02829734c6afdc3dc9cb41ce79ce078b830a53b695ce81`、`267a18e4d4fef9d1afb118d8f1a025cd9922f14963ae75fe672c30c816e5495f`、`b1ae419016695bb6c2a62ffb1b92c7bcbb70c87b22c1ba6d7cb96e327b201f39`；
+- 真实 FPGA 全 mask、单有效、部分窗口、16 token、全等 score、`-16` 截断边界和随机稀疏 mask 回归 100/100 PASS，seed=`20260803`，约 29.05 秒，最坏 float64 概率误差 `2.96390625578e-05`；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，最终未布线网络为 0；
+- 资源：10515 LUT、12703 FF、70 个 distributed RAM、12 DRM18K、8 APM；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.227 ns`、TNS=0，hold WHS=`+0.143 ns`、THS=0；快角 setup WNS=`+2.958 ns`、TNS=0，hold WHS=`+0.067 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 位流：`softmax_f5/pnr/generate_bitstream/softmax_top.sbit`，大小 2101696 B，SHA256=`d6e505ea5495c6054a447608406db0f93855ef55dbfc357c8d113b00adba34fe`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K SOFTMAX F5 V1`，DDR3 初始化成功；
+- 本阶段未实现 V 加权和，严格停在 F5 概率输出。
 
 ### F6 Attention 输出
 
@@ -727,6 +744,14 @@ F4 验证证据（2026-07-24）：
 | `attention_score_f4/pnr/build_attention_score.tcl` | F4 独立 PDS 全流程构建脚本 |
 | `attention_score_f4/README.md` | F4 定点规则、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_attention_score_host.py` | F4 软件自检、真实固定窗口和随机层/窗口/Q/K 上板逐位比较工具 |
+| `model_tools/softmax_fixed_reference.py` | F5 mask 感知 max、PWL exp、36 位求和、Q31 倒数和概率归一化金标准 |
+| `model_tools/softmax_f5_reference.json` | F5 exp LUT、四组真实 F4 score 概率输出和 SHA256 固定清单 |
+| `model_tools/test_softmax_fixed_reference.py` | F5 RNE、LUT 边界、全 mask、单有效、满窗口、载荷和真实固定测试 |
+| `softmax_f5/rtl/softmax_core.v` | F5 score/LUT DRM 缓存、流水 PWL、恢复除法器和概率输出核心 |
+| `softmax_f5/rtl/softmax_ctrl.v` | F5 UART、DDR3 score/LUT 载荷、14 heads 调度和概率部分写回控制器 |
+| `softmax_f5/pnr/build_softmax.tcl` | F5 独立 PDS 全流程构建脚本 |
+| `softmax_f5/README.md` | F5 定点规则、协议、地址、时序、位流和真实上板证据 |
+| `tools/pangu_softmax_host.py` | F5 软件自检、真实固定 score 和随机 mask/窗口上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -744,10 +769,10 @@ F4 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 F5 Softmax：直接消费 F4 已验证的 `[14,16]` signed Q28 Attention Score，
-先建立 causal mask 感知的 max reduction、减最大值、exp 近似/查表、sum reduction、reciprocal
-和归一化的软件金标准，明确概率定点格式、RNE/饱和规则以及全 mask/单有效/长窗口边界行为。
-随后新建独立 Softmax 工程，完成 14 heads 循环调度、固定/随机窗口、数值稳定性、PDS、
-多角时序和真实上板逐位验证。本阶段不得提前进入 V 加权和或 F6 Attention 输出，
-不得覆盖 F4 及更早阶段的验证工程和位流。
+进入 F6 Attention 输出：直接消费 F5 已验证的 `[14,16]` unsigned UQ1.31 概率和 F3 已验证的
+V Cache `[2,64]` signed int64 Q28，先建立 14Q/2KV GQA 的概率×V 加权和软件金标准，明确
+Q59 乘积、跨最多 16 token 累加、RNE 恢复 Q28、饱和、全 mask/单 token/满窗口边界行为。
+随后新建独立 Attention 输出工程，先完成 `[14,64]` 多头结果和 `[896]` 拼接的固定/随机、PDS、
+多角时序与真实上板逐位验证，再继续 O_proj、残差和完整 Attention 子层。本阶段不得提前进入 MLP，
+不得覆盖 F5 及更早阶段的验证工程和位流。
 ```

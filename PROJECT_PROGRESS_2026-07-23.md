@@ -904,9 +904,58 @@ Q/K 缓存改为 256 bit beat 同步读结构，成功推断 8 个 DRM18K；64×
 - 固件：`PANGU50K ATTN SCORE V1`，DDR3 初始化成功；
 - 本阶段严格停在 Attention Score，没有提前实现 Softmax。
 
-## 十九、当前项目状态
+## 十九、F5 Softmax 已完成（2026-07-24）
 
-当前已经完成十三级真实闭环：
+新增软件参考、固定清单、独立硬件工程和上位机：
+
+```text
+model_tools/softmax_fixed_reference.py
+model_tools/softmax_f5_reference.json
+model_tools/test_softmax_fixed_reference.py
+softmax_f5/rtl/softmax_core.v
+softmax_f5/rtl/softmax_ctrl.v
+softmax_f5/rtl/softmax_top.v
+softmax_f5/pnr/build_softmax.tcl
+softmax_f5/pnr/program_sram.tcl
+softmax_f5/README.md
+tools/pangu_softmax_host.py
+```
+
+定点和数值稳定性结论：
+
+```text
+输入 = [14,16] signed int64 Q28
+mask = INT64_MIN，概率严格为 0
+输出 = [14,16] unsigned UQ1.31 uint32
+1.0 = 0x80000000
+exp = [-16,0]、步长 1/32 的 513 点端点 LUT + 线性插值
+sum = 最多 16 项 UQ1.31 的 36 位和
+reciprocal = RNE(2^62 / sum_exp_q31)
+probability = RNE(exp_q31 × reciprocal_q31 / 2^31)
+```
+
+每个 head 先忽略 mask 执行 max reduction，再减最大值，确保 exp 输入不大于 0。差值小于 `-16` 时 exp 尾部置 0；全 mask head 输出全 0；单有效 token 精确输出 1.0；16 个相同 score 精确输出均匀概率。硬件将 26×23 插值乘法拆成四个 13×12/11 部分积和两级加法流水，并在 32×32 概率乘法前增加 exp 选择寄存，最终满足 100 MHz 慢角时序。
+
+验证结果：
+
+- F5 新增单元测试 10/10 PASS；完整 `model_tools` 回归 83/83 PASS；
+- 软件随机 mask、窗口、极端差值、LUT 和载荷压力 1000/1000 PASS，seed=`20260803`，最坏 float64 概率误差 `3.04973546883e-05`；
+- 四组真实 F4 score 固定窗口全部真实上板逐位一致，概率 SHA256 为 `768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608`、`021ac6fad9854aeede02829734c6afdc3dc9cb41ce79ce078b830a53b695ce81`、`267a18e4d4fef9d1afb118d8f1a025cd9922f14963ae75fe672c30c816e5495f`、`b1ae419016695bb6c2a62ffb1b92c7bcbb70c87b22c1ba6d7cb96e327b201f39`；
+- 单有效 token 精确 1.0、未来位置和未使用槽严格为 0；
+- 真实 FPGA 全 mask、单有效、部分窗口、满 16 token、全等 score、`-16` 截断边界和随机稀疏 mask 回归 100/100 PASS，seed=`20260803`，约 29.05 秒；最坏 float64 概率误差 `2.96390625578e-05`；
+- PDS 编译、综合、Device Map、布局布线、时序和位流生成全部成功，最终未布线网络 0；
+- 资源：10515 LUT、12703 FF、70 个 distributed RAM、12 DRM18K、8 APM；
+- 多角时序 `All Constraints Met`；慢角 core setup WNS=`+0.227 ns`、TNS=0，hold WHS=`+0.143 ns`、THS=0；快角 setup WNS=`+2.958 ns`、TNS=0，hold WHS=`+0.067 ns`、THS=0；
+- 恢复、移除和最小脉宽无违例；
+- 位流：`softmax_f5\pnr\generate_bitstream\softmax_top.sbit`，大小 2101696 B；
+- 位流 SHA256：`d6e505ea5495c6054a447608406db0f93855ef55dbfc357c8d113b00adba34fe`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；
+- 固件：`PANGU50K SOFTMAX F5 V1`，DDR3 初始化成功；
+- 本阶段严格停在 Softmax 概率输出，没有提前实现 V 加权和。
+
+## 二十、当前项目状态
+
+当前已经完成十四级真实闭环：
 
 ```text
 长度16单点积
@@ -922,32 +971,31 @@ Q/K 缓存改为 256 bit beat 同步读结构，成功推断 8 个 DRM18K；64×
 → 真实 layer0 Q/K Qwen2 split-half RoPE、位置递增和 Q28/Q1.30 闭环
 → 28 层、16384 token K/V Cache 写入、历史顺序读取、边界和防覆盖闭环
 → 14Q/2KV GQA Attention Score、1/8 缩放、causal mask 和随机窗口闭环
+→ 14 heads mask 感知 Softmax、PWL exp、Q31 倒数和概率归一化闭环
 ```
 
-这证明 DDR3 Controller + PHY、长 burst、片上 DRM 缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、精确 64×64 部分积重构、动态 896/128 行调度、GQA head 布局、Qwen2 split-half RoPE、位置表自动推进、28 层 KV 地址调度、当前 token 写入、历史分段 burst 读取、Attention Score、causal mask、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
+这证明 DDR3 Controller + PHY、长 burst、片上 DRM 缓存、INT4 解包、流水 MAC16、逐组 scale、64 位定点乘加、精确 64×64 部分积重构、动态 896/128 行调度、GQA head 布局、Qwen2 split-half RoPE、位置表自动推进、28 层 KV 地址调度、当前 token 写入、历史分段 burst 读取、Attention Score、causal mask、mask 感知 Softmax、PWL exp、Q31 倒数、概率归一化、RMSNorm、元素级非线性、Embedding、结果流式写回和 Python 自动验证可以协同工作。
 
-当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、KV Cache、Attention Score、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 Softmax、Attention 输出、MLP、Transformer Block 和文本生成。
+当前仍不是完整 Qwen 推理；真实 Q/K/V Linear、RoPE、KV Cache、Attention Score、Softmax、RMSNorm、元素级基础算子和 Embedding 已完成，尚未完成 Attention 输出、MLP、Transformer Block 和文本生成。
 
-## 二十、下一阶段路线
+## 二十一、下一阶段路线
 
-### 当前唯一下一步：F5 Softmax
+### 当前唯一下一步：F6 Attention 输出
 
-1. 直接消费 F4 已验证的 `[14,16]` signed Q28 Attention Score，建立 mask 感知的软件金标准。
-2. 明确概率输出定点格式、RNE、饱和和 mask 哨兵处理规则。
-3. 实现每个 head 的 max reduction 和减最大值，避免 exp 溢出。
-4. 设计 exp 近似或查表、sum reduction、reciprocal 与归一化。
-5. 覆盖全 mask、单有效 token、部分窗口、16 token 满窗口和极端 score 差值的数值稳定性测试。
-6. 新建独立 Softmax 工程，完成 14 heads 循环调度、固定/随机窗口、PDS、多角时序和真实上板逐位验证；本阶段不得提前进入 V 加权和或 F6 Attention 输出。
+1. 直接消费 F5 已验证的 `[14,16]` unsigned UQ1.31 概率和 F3 已验证的 V Cache `[2,64]` signed int64 Q28。
+2. 建立 `14Q -> 2KV` GQA 的概率×V 加权和软件金标准，明确 Q59 乘积、跨最多 16 token 累加、RNE 恢复 Q28 和饱和规则。
+3. 覆盖全 mask、单有效 token、部分窗口、16 token 满窗口和极端 V 的边界测试。
+4. 新建独立 Attention 输出工程，先完成 `[14,64]` 多头结果和 `[896]` 拼接的固定/随机、PDS、多角时序和真实上板逐位验证。
+5. 在加权和闭环通过后继续 `O_proj`、残差和完整 Attention 子层；本阶段不得提前进入 MLP。
 
 ### 后续算子
 
 按以下顺序逐步实现并逐层验证：
 
-1. Softmax。
-2. Attention 输出。
-3. MLP。
-4. Transformer Block。
-5. 完整模型权重加载与分层调度。
-6. tokenizer、采样与文本推理验证。
+1. Attention 输出。
+2. MLP。
+3. Transformer Block。
+4. 完整模型权重加载与分层调度。
+5. tokenizer、采样与文本推理验证。
 
 每一步都应保留“FPGA 结果与 Python 参考逐元素自动比较”的闭环，避免直接跳到完整模型后难以定位错误。

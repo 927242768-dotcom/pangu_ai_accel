@@ -1,0 +1,202 @@
+{
+  "format_version": 1,
+  "definition": {
+    "input_format": "signed int64 Q28",
+    "input_layout": "head-major [14,16]",
+    "mask_value": -9223372036854775808,
+    "max_reduction": "ignore mask sentinel; all-mask head outputs zero",
+    "exp": "513 endpoint LUT on [-16,0], step 1/32, linear interpolation",
+    "exp_format": "unsigned UQ1.31 uint32",
+    "exp_tail": "difference < -16 -> 0; difference == -16 uses LUT endpoint",
+    "sum_format": "unsigned integer carrying Q31, maximum 16*2^31",
+    "reciprocal_rule": "RNE(2^62 / sum_exp_q31)",
+    "normalization_rule": "RNE(exp_q31 * reciprocal_q31 / 2^31)",
+    "output_format": "unsigned UQ1.31 uint32",
+    "one": 2147483648,
+    "output_layout": "head-major [14,16]",
+    "probability_bytes": 896,
+    "exp_lut_entries": 513,
+    "exp_lut_raw_bytes": 2052,
+    "exp_lut_padded_bytes": 2080,
+    "float_error_tolerance": 0.0002,
+    "boundary_behavior": {
+      "all_mask": "all probabilities are zero",
+      "single_valid": "valid probability is exactly 0x80000000",
+      "masked_slot": "probability is exactly zero"
+    }
+  },
+  "sha256": {
+    "exp_lut_q31": "e11fa350697c93addf7da363a2423ca2651587008bf6b4cb012c17e686ad639d",
+    "exp_lut_payload": "60b35302484ec6d24a312caf91c7ac1d13f75ea1836e94d6a50f0bd18e99b0cc"
+  },
+  "cases": [
+    {
+      "label": "layer=0, query=0, window=0..0",
+      "layer": 0,
+      "query_position": 0,
+      "window_start": 0,
+      "count": 1,
+      "max_probability_error": 0.0,
+      "head_debug": {
+        "head0": {
+          "all_masked": false,
+          "max_score_q28": -15608280611,
+          "sum_exp_q31": 2147483648,
+          "reciprocal_q31": 2147483648
+        },
+        "head7": {
+          "all_masked": false,
+          "max_score_q28": 40705181088,
+          "sum_exp_q31": 2147483648,
+          "reciprocal_q31": 2147483648
+        },
+        "head13": {
+          "all_masked": false,
+          "max_score_q28": -66418788646,
+          "sum_exp_q31": 2147483648,
+          "reciprocal_q31": 2147483648
+        }
+      },
+      "sha256": {
+        "scores_q28": "0697d1457bbd91a13a86e06b7de87a9928258c51c2b2b23d31a054bbc99325c5",
+        "probabilities_q31": "768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608",
+        "score_payload": "0697d1457bbd91a13a86e06b7de87a9928258c51c2b2b23d31a054bbc99325c5",
+        "probability_payload": "768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608"
+      },
+      "preview": {
+        "head0_first4": [2147483648, 0, 0, 0],
+        "head7_first4": [2147483648, 0, 0, 0],
+        "head13_first4": [2147483648, 0, 0, 0],
+        "sum_head0": 2147483648,
+        "sum_head7": 2147483648,
+        "sum_head13": 2147483648
+      }
+    },
+    {
+      "label": "layer=0, query=1, window=0..1",
+      "layer": 0,
+      "query_position": 1,
+      "window_start": 0,
+      "count": 2,
+      "max_probability_error": 1.745172853234722e-05,
+      "head_debug": {
+        "head0": {
+          "all_masked": false,
+          "max_score_q28": -15608280632,
+          "sum_exp_q31": 2656737701,
+          "reciprocal_q31": 1735845438
+        },
+        "head7": {
+          "all_masked": false,
+          "max_score_q28": 40705181082,
+          "sum_exp_q31": 2163223059,
+          "reciprocal_q31": 2131858755
+        },
+        "head13": {
+          "all_masked": false,
+          "max_score_q28": -66418788644,
+          "sum_exp_q31": 2157244781,
+          "reciprocal_q31": 2137766682
+        }
+      },
+      "sha256": {
+        "scores_q28": "30deb88a395f65ebaa92810278a8954f4cb0c8999462eb7071449dbf957a515d",
+        "probabilities_q31": "021ac6fad9854aeede02829734c6afdc3dc9cb41ce79ce078b830a53b695ce81",
+        "score_payload": "30deb88a395f65ebaa92810278a8954f4cb0c8999462eb7071449dbf957a515d",
+        "probability_payload": "021ac6fad9854aeede02829734c6afdc3dc9cb41ce79ce078b830a53b695ce81"
+      },
+      "preview": {
+        "head0_first4": [411638210, 1735845438, 0, 0],
+        "head7_first4": [15624892, 2131858755, 0, 0],
+        "head13_first4": [9716966, 2137766682, 0, 0],
+        "sum_head0": 2147483648,
+        "sum_head7": 2147483647,
+        "sum_head13": 2147483648
+      }
+    },
+    {
+      "label": "layer=13, query=2026, window=2023..2028",
+      "layer": 13,
+      "query_position": 2026,
+      "window_start": 2023,
+      "count": 6,
+      "max_probability_error": 1.9565535172461068e-05,
+      "head_debug": {
+        "head0": {
+          "all_masked": false,
+          "max_score_q28": -15608280617,
+          "sum_exp_q31": 3432600500,
+          "reciprocal_q31": 1343496285
+        },
+        "head7": {
+          "all_masked": false,
+          "max_score_q28": 50500040657,
+          "sum_exp_q31": 2147483648,
+          "reciprocal_q31": 2147483648
+        },
+        "head13": {
+          "all_masked": false,
+          "max_score_q28": -66418788645,
+          "sum_exp_q31": 2557275932,
+          "reciprocal_q31": 1803358785
+        }
+      },
+      "sha256": {
+        "scores_q28": "c91ad94ac9af6da06aa2143cd81c87c8d3aeb68cd93ee5e50ecc54271bd51096",
+        "probabilities_q31": "267a18e4d4fef9d1afb118d8f1a025cd9922f14963ae75fe672c30c816e5495f",
+        "score_payload": "c91ad94ac9af6da06aa2143cd81c87c8d3aeb68cd93ee5e50ecc54271bd51096",
+        "probability_payload": "267a18e4d4fef9d1afb118d8f1a025cd9922f14963ae75fe672c30c816e5495f"
+      },
+      "preview": {
+        "head0_first4": [260474825, 224915984, 318596555, 1343496285],
+        "head7_first4": [2147483648, 0, 0, 0],
+        "head13_first4": [334620004, 1307906, 8196953, 1803358785],
+        "sum_head0": 2147483649,
+        "sum_head7": 2147483648,
+        "sum_head13": 2147483648
+      }
+    },
+    {
+      "label": "layer=27, query=16383, window=16368..16383",
+      "layer": 27,
+      "query_position": 16383,
+      "window_start": 16368,
+      "count": 16,
+      "max_probability_error": 2.5826470653855793e-05,
+      "head_debug": {
+        "head0": {
+          "all_masked": false,
+          "max_score_q28": -15608280612,
+          "sum_exp_q31": 4010353187,
+          "reciprocal_q31": 1149945105
+        },
+        "head7": {
+          "all_masked": false,
+          "max_score_q28": 60443950760,
+          "sum_exp_q31": 2147682395,
+          "reciprocal_q31": 2147284919
+        },
+        "head13": {
+          "all_masked": false,
+          "max_score_q28": -62566029207,
+          "sum_exp_q31": 2357544475,
+          "reciprocal_q31": 1956139563
+        }
+      },
+      "sha256": {
+        "scores_q28": "466cea477112b15a43ee5d03529bc34c10880f93887e44ae078bfac3ef527948",
+        "probabilities_q31": "b1ae419016695bb6c2a62ffb1b92c7bcbb70c87b22c1ba6d7cb96e327b201f39",
+        "score_payload": "466cea477112b15a43ee5d03529bc34c10880f93887e44ae078bfac3ef527948",
+        "probability_payload": "b1ae419016695bb6c2a62ffb1b92c7bcbb70c87b22c1ba6d7cb96e327b201f39"
+      },
+      "preview": {
+        "head0_first4": [17824, 2950, 1548, 4132],
+        "head7_first4": [0, 0, 0, 0],
+        "head13_first4": [0, 0, 0, 5018],
+        "sum_head0": 2147483648,
+        "sum_head7": 2147483648,
+        "sum_head13": 2147483649
+      }
+    }
+  ]
+}

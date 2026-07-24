@@ -439,3 +439,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - F4 新增单元测试 9/9 PASS；完整 `model_tools` 回归 73/73 PASS；
 - 软件随机窗口、GQA、RNE、mask 和载荷压力 1000/1000 PASS，seed=`20260802`；
 - 固定清单：`attention_score_f4_reference.json`。
+
+
+2026-07-24 建立 F5 Softmax 定点软件参考：
+
+- 输入为 F4 `[14,16]` head-major signed int64 Q28 score，`INT64_MIN` 表示 mask；
+- 每个 head 忽略 mask 执行 max reduction，减最大值后所有有效差值不大于 0；
+- exp 使用 `[-16,0]`、步长 `1/32` 的 513 点 unsigned UQ1.31 端点 LUT 和线性插值，差值小于 `-16` 时置 0；
+- 最多 16 项 exp 使用 36 位和，倒数为 `RNE(2^62/sum_exp_q31)`；
+- 概率为 `RNE(exp_q31*reciprocal_q31/2^31)`，输出 `[14,16]` unsigned UQ1.31 uint32，`1.0=0x80000000`；
+- 全 mask head 输出全 0，单有效 token 精确输出 1.0，相同 16 个有效 score 精确输出均匀概率；
+- F5 新增单元测试 10/10 PASS；完整 `model_tools` 回归 83/83 PASS；
+- 软件随机 mask、窗口、极端差值、LUT 和载荷压力 1000/1000 PASS，seed=`20260803`，最坏 float64 概率误差 `3.04973546883e-05`；
+- 固定清单：`softmax_f5_reference.json`。
