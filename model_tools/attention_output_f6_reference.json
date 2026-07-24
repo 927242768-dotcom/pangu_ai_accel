@@ -1,0 +1,146 @@
+{
+  "format_version": 1,
+  "definition": {
+    "probability_format": "unsigned UQ1.31 uint32",
+    "probability_layout": "head-major [14,16]",
+    "v_format": "signed int64 Q28",
+    "v_history_layout": "token-major [count,2,64]",
+    "gqa_mapping": "Q head 0..6 -> KV0; Q head 7..13 -> KV1",
+    "product_format": "signed Q59 exact integer product",
+    "accumulator": "exact signed integer sum across at most 16 tokens",
+    "rounding": "single signed RNE right shift by 31 after full accumulation",
+    "saturation": "explicit signed int64 saturation after RNE",
+    "output_format": "signed int64 Q28",
+    "output_heads_layout": "head-major [14,64]",
+    "output_flat_layout": "head-major contiguous [896]",
+    "probability_bytes": 896,
+    "v_token_bytes": 1024,
+    "output_bytes": 7168,
+    "q_heads": 14,
+    "kv_heads": 2,
+    "gqa_group_size": 7,
+    "head_dim": 64,
+    "max_tokens": 16,
+    "v_fixed_generator": "real layer0 v_proj; activation_seed=20260804+position",
+    "boundary_behavior": {
+      "all_mask": "all-zero probabilities produce all-zero output",
+      "single_token": "0x80000000 probability copies mapped V exactly",
+      "unused_slot": "all probability slots at index >= count must be zero",
+      "full_window": "all 16 tokens are accumulated before one RNE"
+    }
+  },
+  "cases": [
+    {
+      "label": "layer=0, query=0, window=0..0",
+      "layer": 0,
+      "query_position": 0,
+      "window_start": 0,
+      "count": 1,
+      "positions": [0],
+      "v_activation_seeds": [20260804],
+      "debug": {
+        "max_abs_accumulator_q59": 1302916174345928704,
+        "saturated_values": 0
+      },
+      "sha256": {
+        "probabilities_q31": "768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608",
+        "probability_payload": "768bd8912f9168473b8978963e805b52b5eeb40b26c517229dc6a4c8d96ce608",
+        "v_history_q28": "d24e7f644112d4ec840e4125dc5b177c6b423dabfc0b6dbe6bc9447909bd17c1",
+        "v_payloads": "d24e7f644112d4ec840e4125dc5b177c6b423dabfc0b6dbe6bc9447909bd17c1",
+        "output_heads_q28": "c5107911c0e6b9f1d9c471d7dde2c26d1192282abc964eb5005051aa5a4c9f71",
+        "output_payload": "c5107911c0e6b9f1d9c471d7dde2c26d1192282abc964eb5005051aa5a4c9f71"
+      },
+      "preview": {
+        "head0_first8": [77944436, 36359148, 64376146, -246251143, -200909103, 171029114, 57989570, -228448240],
+        "head7_first8": [-108648792, -67362129, -419327625, -535838029, 118202664, -113294936, 95364440, 261357566],
+        "head13_last8": [94258574, -572122053, -232212615, 229222937, 447220586, -184061837, -179987010, 319322813],
+        "flat_first8": [77944436, 36359148, 64376146, -246251143, -200909103, 171029114, 57989570, -228448240],
+        "flat_last8": [94258574, -572122053, -232212615, 229222937, 447220586, -184061837, -179987010, 319322813]
+      }
+    },
+    {
+      "label": "layer=0, query=1, window=0..1",
+      "layer": 0,
+      "query_position": 1,
+      "window_start": 0,
+      "count": 2,
+      "positions": [0, 1],
+      "v_activation_seeds": [20260804, 20260805],
+      "debug": {
+        "max_abs_accumulator_q59": 1459891405039075328,
+        "saturated_values": 0
+      },
+      "sha256": {
+        "probabilities_q31": "021ac6fad9854aeede02829734c6afdc3dc9cb41ce79ce078b830a53b695ce81",
+        "probability_payload": "021ac6fad9854aeede02829734c6afdc3dc9cb41ce79ce078b830a53b695ce81",
+        "v_history_q28": "18532d789872214bcce3126caeb2c343fdbd8cf18e69c9224f9fd4a5a3aa50bf",
+        "v_payloads": "18532d789872214bcce3126caeb2c343fdbd8cf18e69c9224f9fd4a5a3aa50bf",
+        "output_heads_q28": "14a6ee14736ed6132ea1357d3af27d55074492a727b196c33cd6905d4e1c9b02",
+        "output_payload": "14a6ee14736ed6132ea1357d3af27d55074492a727b196c33cd6905d4e1c9b02"
+      },
+      "preview": {
+        "head0_first8": [19140938, -241838807, 33110245, -78434976, 275664794, -3348339, 23544928, -104195061],
+        "head7_first8": [283360168, -105251555, -498667608, -41067781, -15939166, -409808414, -90088606, -327262012],
+        "head13_last8": [188134524, 135368782, -377002475, 652436948, -674715284, -161266349, -300923814, -29519801],
+        "flat_first8": [19140938, -241838807, 33110245, -78434976, 275664794, -3348339, 23544928, -104195061],
+        "flat_last8": [188134524, 135368782, -377002475, 652436948, -674715284, -161266349, -300923814, -29519801]
+      }
+    },
+    {
+      "label": "layer=13, query=2026, window=2023..2028",
+      "layer": 13,
+      "query_position": 2026,
+      "window_start": 2023,
+      "count": 6,
+      "positions": [2023, 2024, 2025, 2026, 2027, 2028],
+      "v_activation_seeds": [20262827, 20262828, 20262829, 20262830, 20262831, 20262832],
+      "debug": {
+        "max_abs_accumulator_q59": 1321271086452572160,
+        "saturated_values": 0
+      },
+      "sha256": {
+        "probabilities_q31": "267a18e4d4fef9d1afb118d8f1a025cd9922f14963ae75fe672c30c816e5495f",
+        "probability_payload": "267a18e4d4fef9d1afb118d8f1a025cd9922f14963ae75fe672c30c816e5495f",
+        "v_history_q28": "fafe1750d57f7ae87cf1eb0c948b38e29cb99928fa6dbb8f2835e22954258997",
+        "v_payloads": "fafe1750d57f7ae87cf1eb0c948b38e29cb99928fa6dbb8f2835e22954258997",
+        "output_heads_q28": "86bc89cc77d49ac9451cc2a707510df310566997faf4c76fdfa95599043c248b",
+        "output_payload": "86bc89cc77d49ac9451cc2a707510df310566997faf4c76fdfa95599043c248b"
+      },
+      "preview": {
+        "head0_first8": [17177261, 69099436, -94142541, 65408652, 37693573, -9668547, 91229683, 156822497],
+        "head7_first8": [438975549, 224018188, 282360590, 615264795, 34128189, 77815638, -368023861, 38184075],
+        "head13_last8": [21504214, 178144379, -17443787, -127009349, -189144323, 375285027, -323052450, 125478284],
+        "flat_first8": [17177261, 69099436, -94142541, 65408652, 37693573, -9668547, 91229683, 156822497],
+        "flat_last8": [21504214, 178144379, -17443787, -127009349, -189144323, 375285027, -323052450, 125478284]
+      }
+    },
+    {
+      "label": "layer=27, query=16383, window=16368..16383",
+      "layer": 27,
+      "query_position": 16383,
+      "window_start": 16368,
+      "count": 16,
+      "positions": [16368, 16369, 16370, 16371, 16372, 16373, 16374, 16375, 16376, 16377, 16378, 16379, 16380, 16381, 16382, 16383],
+      "v_activation_seeds": [20277172, 20277173, 20277174, 20277175, 20277176, 20277177, 20277178, 20277179, 20277180, 20277181, 20277182, 20277183, 20277184, 20277185, 20277186, 20277187],
+      "debug": {
+        "max_abs_accumulator_q59": 1453594076363890600,
+        "saturated_values": 0
+      },
+      "sha256": {
+        "probabilities_q31": "b1ae419016695bb6c2a62ffb1b92c7bcbb70c87b22c1ba6d7cb96e327b201f39",
+        "probability_payload": "b1ae419016695bb6c2a62ffb1b92c7bcbb70c87b22c1ba6d7cb96e327b201f39",
+        "v_history_q28": "788e26e28d10a709ac606e3ed6469c96882b6f6d9d154754538e8f4f2b3a4423",
+        "v_payloads": "788e26e28d10a709ac606e3ed6469c96882b6f6d9d154754538e8f4f2b3a4423",
+        "output_heads_q28": "73e6b464b8c27e6a4d1066df5b5dade1c11c6a085a712d58dc54f6b598a0e407",
+        "output_payload": "73e6b464b8c27e6a4d1066df5b5dade1c11c6a085a712d58dc54f6b598a0e407"
+      },
+      "preview": {
+        "head0_first8": [-90346410, -28266233, -168027303, -41657976, -45926320, -77677993, -173168443, 50659117],
+        "head7_first8": [148501128, -9815504, -326935406, 332562712, -99916205, -209482646, 54529693, 354634675],
+        "head13_last8": [-205399696, -186791618, -25459738, -78041196, 164531485, -93571782, 178553345, -111003722],
+        "flat_first8": [-90346410, -28266233, -168027303, -41657976, -45926320, -77677993, -173168443, 50659117],
+        "flat_last8": [-205399696, -186791618, -25459738, -78041196, 164531485, -93571782, 178553345, -111003722]
+      }
+    }
+  ]
+}

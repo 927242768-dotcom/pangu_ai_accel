@@ -549,11 +549,26 @@ F5 验证证据（2026-07-24）：
 
 ### F6 Attention 输出
 
-- [ ] softmax 权重与 V 的加权和
-- [ ] 多头拼接
+- [x] softmax 权重与 V 的加权和
+- [x] 多头拼接
 - [ ] 输出投影 `O_proj`
 - [ ] 残差连接
 - [ ] 完整 Attention 子层与软件参考比较
+
+F6 第一段验证证据（2026-07-24）：
+
+- 新增独立 `attention_output_f6` 工程，直接消费 F5 `[14,16]` head-major unsigned UQ1.31 概率，并按 F3 地址读取 `[count,2,64]` signed int64 Q28 V Cache；未覆盖 F5 或更早工程和位流；
+- GQA 映射固定为 Q head `0..6 -> KV0`、`7..13 -> KV1`；每项概率×V 为 signed Q59，最多 16 项在 signed 100 bit 中精确累加，全部累加结束后仅执行一次 signed RNE 右移 31 位并显式饱和到 signed int64 Q28；
+- 输出为 `[14,64]` head-major，可无损拼接为连续 `[896]`，共 7168 B；全 mask 输出严格全 0，单 token `1.0=0x80000000` 精确复制对应 V，固定未使用概率槽必须为 0；
+- F6 新增单元测试 10/10 PASS，完整 `model_tools` 回归 93/93 PASS；软件随机 GQA、Q59、RNE、饱和和载荷压力 1000/1000 PASS，seed=`20260804`；
+- 四组真实 F5 概率与逐 position 真实 layer0 `v_proj` 固定 V 全部上板逐位一致，输出 SHA256 分别为 `c5107911c0e6b9f1d9c471d7dde2c26d1192282abc964eb5005051aa5a4c9f71`、`14a6ee14736ed6132ea1357d3af27d55074492a727b196c33cd6905d4e1c9b02`、`86bc89cc77d49ac9451cc2a707510df310566997faf4c76fdfa95599043c248b`、`73e6b464b8c27e6a4d1066df5b5dade1c11c6a085a712d58dc54f6b598a0e407`；
+- 真实 FPGA 全 mask、单 token 1.0、14Q/2KV 映射、`INT64_MIN/MAX` 极端 V，以及 16-token Q59 宽累加后的 INT64 正/负双向饱和边界全部通过；随机层、随机 start、count `1..16`、随机概率/V 回归 100/100 PASS，seed=`20260804`，约 182.09 秒；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，详细路由 155 轮后未布线网络为 0；
+- 资源：9184 LUT、11357 FF、70 个 distributed RAM、12 DRM、1 APM；概率缓存映射为 8 个 DRM9K，16-token V 缓存映射为 8 个 DRM18K；
+- 多角时序 `All Constraints Met`：慢角 setup WNS=`+0.825 ns`、TNS=0，hold WHS=`+0.112 ns`、THS=0；快角 setup WNS=`+3.349 ns`、TNS=0，hold WHS=`+0.032 ns`、THS=0；恢复和移除无违例；
+- 位流：`attention_output_f6/pnr/generate_bitstream/attention_output_top.sbit`，大小 2101696 B，SHA256=`d7e64c58b73f8ca93f7a7dd981feabe5cc48f9b43e6b2ff0d8f60155886f36a3`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K ATTN OUTPUT V1`，DDR3 初始化成功；
+- 本阶段严格停在 Attention 加权和与多头拼接，尚未实现 `O_proj`、Attention 残差或 MLP。
 
 ## 阶段 G：MLP 和 Transformer Block
 
@@ -752,6 +767,14 @@ F5 验证证据（2026-07-24）：
 | `softmax_f5/pnr/build_softmax.tcl` | F5 独立 PDS 全流程构建脚本 |
 | `softmax_f5/README.md` | F5 定点规则、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_softmax_host.py` | F5 软件自检、真实固定 score 和随机 mask/窗口上板逐位比较工具 |
+| `model_tools/attention_output_reference.py` | F6 概率×V、14Q/2KV GQA、Q59 累加、signed RNE、饱和和 `[14,64]/[896]` 金标准 |
+| `model_tools/attention_output_f6_reference.json` | F6 四组真实固定概率/V、完整输出和载荷 SHA256 清单 |
+| `model_tools/test_attention_output_reference.py` | F6 RNE ties、全 mask、单 token、满窗口、极端 V、拼接和真实清单测试 |
+| `attention_output_f6/rtl/attention_output_core.v` | F6 DRM 概率/V 缓存、顺序 16-bit 部分积、100-bit Q59 累加、RNE 和流式输出核心 |
+| `attention_output_f6/rtl/attention_output_ctrl.v` | F6 UART、F3 V 地址读取、16-token 装载、输出 byte-enable 写回和结果回读控制器 |
+| `attention_output_f6/pnr/build_attention_output.tcl` | F6 独立 PDS 全流程构建脚本 |
+| `attention_output_f6/README.md` | F6 定点规则、协议、地址、资源、时序、位流和真实上板证据 |
+| `tools/pangu_attention_output_host.py` | F6 软件自检、真实固定/边界和随机层/窗口/概率/V 上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -769,10 +792,10 @@ F5 验证证据（2026-07-24）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-进入 F6 Attention 输出：直接消费 F5 已验证的 `[14,16]` unsigned UQ1.31 概率和 F3 已验证的
-V Cache `[2,64]` signed int64 Q28，先建立 14Q/2KV GQA 的概率×V 加权和软件金标准，明确
-Q59 乘积、跨最多 16 token 累加、RNE 恢复 Q28、饱和、全 mask/单 token/满窗口边界行为。
-随后新建独立 Attention 输出工程，先完成 `[14,64]` 多头结果和 `[896]` 拼接的固定/随机、PDS、
-多角时序与真实上板逐位验证，再继续 O_proj、残差和完整 Attention 子层。本阶段不得提前进入 MLP，
-不得覆盖 F5 及更早阶段的验证工程和位流。
+继续 F6 Attention 输出的下一小步：基于已经真实上板逐位通过的 `[896]` Attention 多头拼接结果，
+建立真实 layer0 `self_attn.o_proj=[896,896]` 的分组 INT4 软件金标准和独立硬件闭环。优先复用已经
+验证的通用 GEMV / layer0 q_proj 数据通路，但必须新建或隔离 O_proj 验证入口，不覆盖 F6 加权和、
+F5 Softmax 或更早工程和位流。验收必须包含真实 `.p50` O_proj 参数、固定与随机逐位比较、PDS
+全流程、多角时序、JTAG SRAM 上板和压力测试。O_proj 完成后再接 Attention 残差与完整子层；
+不得提前进入 MLP。
 ```

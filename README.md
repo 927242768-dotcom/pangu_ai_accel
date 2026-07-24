@@ -21,10 +21,11 @@
 15. [`kv_cache_f3/README.md`](kv_cache_f3/README.md)：已验证的 28 层、16384 token、真实 K/V 写入、历史顺序读取和防覆盖闭环。
 16. [`attention_score_f4/README.md`](attention_score_f4/README.md)：已验证的 14Q/2KV GQA Attention Score、1/8 缩放和 causal mask 闭环。
 17. [`softmax_f5/README.md`](softmax_f5/README.md)：已验证的 mask 感知 Softmax、PWL exp、Q31 倒数和概率归一化闭环。
+18. [`attention_output_f6/README.md`](attention_output_f6/README.md)：已验证的 F5 概率×F3 V、14Q/2KV GQA、Q59 累加、RNE 和 `[14,64]/[896]` Attention 输出闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V 和 RoPE 的多级计算闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax 和 Attention 输出加权和的多级计算闭环：
 
 ```text
 长度16单点积：
@@ -66,14 +67,15 @@ F4 Attention Score 现已完成。独立工程 `attention_score_f4` 直接消费
 
 F5 Softmax 现已完成。独立工程 `softmax_f5` 直接消费 F4 `[14,16]` signed Q28 score，实现 mask 感知 max、减最大值、`[-16,0]`/步长 `1/32` 的 513 点 UQ1.31 PWL exp、36 位求和、恢复除法 Q31 倒数和概率归一化；输出为 `[14,16]` unsigned UQ1.31。全 mask、单有效、部分/满窗口、全等 score 和极端差值行为均已固定。四组真实 F4 窗口上板逐位一致；完整软件回归 `83/83 PASS`，软件随机 `1000/1000 PASS`，真实随机 mask/窗口 `100/100 PASS`，最坏 float64 概率误差 `2.96390625578e-05`。PDS 所有角时序通过，慢角 setup WNS=`+0.227 ns`、TNS=0、hold WHS=`+0.143 ns`、THS=0；位流 SHA256=`d6e505ea5495c6054a447608406db0f93855ef55dbfc357c8d113b00adba34fe`。
 
+F6 Attention 输出的第一段现已完成。独立工程 `attention_output_f6` 直接消费 F5 `[14,16]` unsigned UQ1.31 概率并按 F3 地址读取最多 16 token 的 `[2,64]` signed int64 Q28 V；按 `14Q -> 2KV` GQA 形成 signed Q59 乘积，在 100 bit 中精确累加后单次 signed RNE 右移 31 位，输出 `[14,64]` 并 head-major 拼接为 `[896]`。四组真实固定窗口、全 mask、单 token `INT64_MIN/MAX` 极端 V，以及 16-token INT64 正/负双向饱和全部上板逐位一致；完整软件回归 `93/93 PASS`，软件随机 `1000/1000 PASS`，真实随机层/窗口/概率/V `100/100 PASS`。PDS 所有角时序通过，慢角 setup WNS=`+0.825 ns`、TNS=0、hold WHS=`+0.112 ns`、THS=0；位流 SHA256=`d7e64c58b73f8ca93f7a7dd981feabe5cc48f9b43e6b2ff0d8f60155886f36a3`。
+
 ## 当前唯一下一任务
 
 ```text
-进入 F6 Attention 输出：消费 F5 已验证的 `[14,16]` unsigned UQ1.31 概率和 F3 V Cache，
-先建立 14Q/2KV GQA 的概率×V 加权和软件金标准，明确 Q59 乘积、跨最多 16 token 累加、
-RNE 恢复 Q28、饱和和全 mask/单 token/满窗口边界；再新建独立工程完成 `[14,64]`
-多头结果、`[896]` 拼接、固定/随机、PDS、多角时序和真实上板逐位验证。
-不得提前进入 MLP，且不得覆盖 F5 及更早阶段的验证工程和位流。
+继续 F6：基于已经真实上板逐位通过的 `[896]` Attention 多头拼接结果，建立真实 layer0
+`self_attn.o_proj=[896,896]` 的分组 INT4 软件金标准和独立硬件闭环。优先复用已验证的通用
+GEMV / layer0 q_proj 数据通路，但必须隔离 O_proj 验证入口，不覆盖 F6 加权和或更早工程。
+完成固定/随机、PDS、多角时序和真实上板后，再接 Attention 残差；不得提前进入 MLP。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

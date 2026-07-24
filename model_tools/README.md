@@ -110,6 +110,10 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `kv_cache_reference.json` | F3 固定层/位置 K/V 地址和 SHA256 清单 |
 | `attention_score_reference.py` | F4 Q·K、1/8 缩放、14Q/2KV GQA、causal mask 和固定 `[14,16]` score 金标准 |
 | `attention_score_f4_reference.json` | F4 固定真实窗口、mask、K 地址和完整 score SHA256 清单 |
+| `softmax_fixed_reference.py` | F5 mask 感知 max、PWL exp、36 位求和、Q31 倒数和 UQ1.31 概率金标准 |
+| `softmax_f5_reference.json` | F5 exp LUT、四组真实 score 概率输出和 SHA256 固定清单 |
+| `attention_output_reference.py` | F6 概率×V、14Q/2KV GQA、Q59 累加、signed RNE、饱和和 `[14,64]/[896]` 金标准 |
+| `attention_output_f6_reference.json` | F6 四组真实 F5 概率、真实 V history、完整输出和载荷 SHA256 清单 |
 | `rmsnorm_fixed_reference.py` | layer0 input_layernorm 的 Q6.10、Q12.20、LUT/NR rsqrt 与硬件等价金标准 |
 | `rmsnorm_layer0_reference.json` | K=896 固定输入、真实 gamma、rsqrt LUT 和输出 SHA256 清单 |
 | `elementwise_fixed_reference.py` | signed Q6.10 残差、缩放、元素乘法和 SiLU LUT/PWL 硬件等价参考 |
@@ -122,6 +126,8 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `test_rope_fixed_reference.py` | F2 split-half 配对、RNE、固定位置和随机 Q/K 测试 |
 | `test_kv_cache_reference.py` | F3 地址容量、边界、载荷和随机层/位置测试 |
 | `test_attention_score_reference.py` | F4 GQA、RNE、1/8 缩放、causal mask、载荷和真实固定窗口测试 |
+| `test_softmax_fixed_reference.py` | F5 RNE、LUT 边界、mask、满窗口、载荷和真实固定 score 测试 |
+| `test_attention_output_reference.py` | F6 signed RNE ties、GQA、全 mask、单/满窗口、极端 V、拼接和真实清单测试 |
 | `test_rmsnorm_fixed_reference.py` | RMSNorm RNE、边界、真实 gamma、rsqrt 和 1000 轮软件压力测试 |
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
@@ -452,3 +458,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - F5 新增单元测试 10/10 PASS；完整 `model_tools` 回归 83/83 PASS；
 - 软件随机 mask、窗口、极端差值、LUT 和载荷压力 1000/1000 PASS，seed=`20260803`，最坏 float64 概率误差 `3.04973546883e-05`；
 - 固定清单：`softmax_f5_reference.json`。
+
+
+2026-07-24 建立 F6 Attention 输出加权和定点软件参考：
+
+- 概率直接消费 F5 `[14,16]` head-major unsigned UQ1.31 uint32，V history 直接使用 F3 `[count,2,64]` token-major signed int64 Q28；
+- GQA 映射为 Q head `0..6 -> KV0`、`7..13 -> KV1`；
+- 每项乘积为 signed Q59，最多 16 token 在任意精度软件整数中精确累加，全部累加结束后仅执行一次 signed RNE 右移 31 位并显式饱和到 int64 Q28；
+- 输出为 `[14,64]` head-major，可无损拼接为连续 `[896]`，共 7168 B；
+- 全 mask 概率严格输出全 0，单 token `1.0=0x80000000` 精确复制对应 V，`count` 之外概率槽必须为 0；
+- 四组固定概率复用 F5 清单，V 为按 position 使用不同 activation seed 生成的真实 layer0 `v_proj` 输出；
+- F6 新增单元测试 10/10 PASS；完整 `model_tools` 回归 93/93 PASS；
+- 软件随机 GQA、Q59、RNE、饱和、概率/V/输出载荷和 `[14,64] <-> [896]` 往返压力 1000/1000 PASS，seed=`20260804`；
+- 固定清单：`attention_output_f6_reference.json`。
