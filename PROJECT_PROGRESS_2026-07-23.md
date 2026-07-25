@@ -1655,3 +1655,283 @@ block hidden [896] signed Q6.10
 5. 完成 PDS Compile/Synthesize/Map/PnR/Timing/Bitstream，全角 TNS/THS 必须为 0。
 6. 仅通过 JTAG SRAM 下载，完成完整 Block 固定与随机/边界真实板卡逐位压力。
 7. 完整 Block 单独全部通过前不得进入 28 层全模型调度、LM Head 或文本生成。
+
+
+## 三十六、G2.1 完整 layer0 Transformer Block 软件全链与集成契约（2026-07-25）
+
+本轮开始执行 G2，但只完成可独立验收的软件基线与硬件集成契约，没有宣称完整 Block RTL、PDS、位流或真实板卡已经通过。
+
+软件全链现在从同一组 block hidden state 出发，严格连贯执行：
+
+```text
+hidden Q6.10
+→ input RMSNorm
+→ Q/K/V
+→ RoPE
+→ KV history / Attention Score / Softmax / probability×V
+→ O_proj
+→ 第一处残差
+→ post_attention_layernorm
+→ gate_proj / up_proj
+→ SiLU(gate)
+→ SiLU(gate) × up
+→ down_proj
+→ 第二处残差
+→ block output Q6.10
+```
+
+新增内容：
+
+- `model_tools/transformer_block_reference.py`：G2 完整软件金标准、DDR3 地址表、阶段 ID、握手契约和动态载荷；
+- `model_tools/transformer_block_g2_reference.json`：四组真实固定用例和关键中间张量 SHA256；
+- `model_tools/test_transformer_block_reference.py`：5 项集成测试；
+- `transformer_block_g2/README.md`：独立工程边界、下一步 RTL 文件与完整验收标准；
+- `transformer_block_g2/rtl/transformer_block_contract.vh`：控制器地址和阶段 ID 的 RTL 镜像。
+
+固定真实用例：
+
+- query/count=`0/1、1/2、5/6、15/16`；
+- 最终 Block 输出 SHA256 分别为：
+  - `630952eaf6fe179639773f2b60d1e9e990f380b0e698fa3d493dd7c279c96104`
+  - `1cd96d92e43203abda26cace446c2664a0cbaa1fad29a8658a0d94941fbfbea7`
+  - `b2365afdc2857c543628c9d15fd829005ede98aa99d35a8c4f973f61b35ed9dc`
+  - `c164aab5251afc3954b8689a826a1241d1c7d6757adef5c5a232e127b59a4032`
+- 四组结果与已经真实上板验证的 G1 第二处残差最终结果完全一致；
+- 动态载荷长度分别为 2112、4160、12352、32832 B，header/hidden/trig/history K/V 往返校验通过；
+- 完整软件链不同 seed/query/window 确定性压力 1/1 PASS，seed=`20260818`；
+- 新增测试 5/5 PASS，完整 `model_tools` 回归 147/147 PASS。
+
+地址与调度契约：
+
+- 冻结 26 个 scratch/查表区域、17 个 Linear 参数区域和 21 个状态 ID；
+- DDR3 Controller 地址单位仍为 32 bit；低端参数区最高结束字节地址为 `0x01823000`，未越过低端 128 MiB；
+- F3 KV Cache 布局保持不变：字节基址 `0x08000000`、layer stride 32 MiB、token stride 2048 B、V offset 1024 B；
+- layer27/position16383 的 V 末地址恰好为 1 GiB 末端 `0x40000000`；
+- start 只在 idle 接受，busy 覆盖完整执行，done 只在最终 DDR3 写回完成后单拍产生，error/stage/timeout 必须可定位。
+
+## 三十七、G2.1 阶段结束时状态（后续已由第三十九节更新）
+
+在 G2.1 软件基线刚建立时，完整 Block scheduler/controller/top、共享 Linear engine、PDS 工程、时序报告、位流和真实板卡结果尚不存在，因此当时不得把“一个完整 Block 与软件参考比较”标记为完成。后续 G2.2 已完成部分硬件骨架，当前唯一任务以第三十九节为准。
+
+### G2.1 当时计划：继续完整 layer0 Transformer Block 硬件集成
+
+1. 在独立 `transformer_block_g2` 目录实现可覆盖 Q/K/V/O_proj/gate/up/down 的运行时参数化共享 Linear engine。
+2. 按已冻结 18 个计算阶段建立顶层顺序 scheduler、明确 start/busy/done/error/watchdog 握手和 DDR3 地址切换。
+3. 逐步接入已验证 RMSNorm、RoPE、KV Cache、Attention、Softmax、元素级运算与残差能力，不修改历史工程和位流。
+4. 使用四组固定清单逐阶段比较中间 SHA256，再扩展真实 hidden、随机和饱和边界。
+5. 完成独立 PDS Compile/Synthesize/Map/PnR/Timing/Bitstream，所有角 TNS/THS 为 0、未布线网络为 0。
+6. 仅通过 JTAG SRAM 下载并完成真实 FPGA 完整 Block 逐位压力；在此之前不得进入 28 层调度、LM Head 或文本生成。
+
+
+## 三十八、G2.2 共享 Linear、运行时调度与量化规格（2026-07-25）
+
+在 G2.1 软件全链基础上，本轮继续向真实完整 Block 硬件集成推进，并发现、修正了一个不能绕过的架构问题：此前 Q/K/V、O_proj、gate/up、down_proj 的独立工程均由主机提前生成 INT8 激活和 `activation_scale × weight_scale` UQ4.28；完整 Block 的中间激活由 FPGA 自身产生，主机不可能提前知道后续 O_proj、gate/up、down_proj 的 activation scale。因此，真正的 G2 必须在 FPGA 上加入运行时激活量化和 combined scale 构建，不能只把既有算子状态机机械串联。
+
+### 1. 精确运行时量化软件规格
+
+新增：
+
+```text
+model_tools/runtime_linear_quant_reference.py
+model_tools/test_runtime_linear_quant_reference.py
+```
+
+数值定义保持与已经真实上板验证的 G1/F6 完全一致：
+
+- Q6.10 输入：精确执行 `round_rne(x * 127 / max_abs)`，输出 symmetric INT8 `[-127,127]`；
+- Q28 输入：先严格复现原 `int64 Q28 -> float64 / 2^28 -> IEEE binary32` 舍入，再执行 symmetric INT8；禁止直接用原始 int64 max 做近似替换；
+- 全零向量：activation scale 固定为 1.0，激活全部为 0；
+- P50 FP16 weight scale 被解释为精确二进制有理数，与 activation scale 相乘后执行 UQ4.28 RNE 和显式饱和；
+- 整数除法使用商、余数与 ties-to-even，不依赖近似浮点除法。
+
+新增 6 项测试全部通过，覆盖：
+
+- 正负 ties-to-even；
+- Q10 全零和 int16 极值；
+- Q28→binary32 的确定性；
+- 真实 Q/K/V 三矩阵；
+- 真实 gate/up 共享激活；
+- 真实 O_proj/down_proj Q28 输入和全部 combined scale。
+
+七个真实矩阵的全部 INT8 激活与 scale 数组逐位复现原 NumPy/G1/F6 定义。
+
+### 2. 集成契约扩展
+
+完整 Block 顶层不再只有 18 个显式算子阶段，而是加入四个不可省略的运行时量化阶段：
+
+```text
+INPUT_RMS
+QKV_QUANT
+Q_LINEAR / K_LINEAR / V_LINEAR
+ROPE / KV_WRITE / ATTENTION_SCORE / SOFTMAX / ATTENTION_OUTPUT
+OPROJ_QUANT / OPROJ_LINEAR / RESIDUAL1
+POST_RMS
+GATE_UP_QUANT / GATE_LINEAR / UP_LINEAR
+SILU / SILU_UP_MUL
+DOWN_QUANT / DOWN_LINEAR / RESIDUAL2
+```
+
+当前冻结：
+
+- 22 个计算阶段；加 IDLE/DONE/ERROR 共 25 个状态 ID；
+- 28 个 scratch/查表区域；
+- 24 个 Linear 权重、combined scale、bias 和原始 FP16 weight-scale 区；
+- 七个矩阵调用描述，明确 M/K/groups、activation/weight/raw-scale/combined-scale/bias/result 地址；
+- 共享 `linear_activation_int8` scratch 和量化元数据区；
+- 低端参数区最高结束字节地址 `0x018a5400`，仍远低于 128 MiB；
+- F3 KV Cache 地址公式保持不变，1 GiB 边界检查继续通过。
+
+Python 与 `transformer_block_contract.vh` 的全部地址和 25 个状态宏均由测试逐项比较，防止静默错位。
+
+### 3. 可综合共享 Linear 与调度骨架
+
+新增 RTL：
+
+```text
+transformer_block_g2/rtl/int4_unpack16.v
+transformer_block_g2/rtl/int8_dot16_pipe.v
+transformer_block_g2/rtl/shared_linear_engine.v
+transformer_block_g2/rtl/runtime_linear_ctrl.v
+transformer_block_g2/rtl/transformer_block_scheduler.v
+```
+
+`shared_linear_engine.v` 统一支持：
+
+- K=896、56 个 16-element block、14 groups；
+- K=4864、304 个 16-element block、76 groups；
+- signed INT8 × signed INT4；
+- 每组 signed int32 点积；
+- unsigned UQ4.28 combined scale；
+- signed int64 Q28 跨组累加和可选 bias。
+
+`runtime_linear_ctrl.v` 统一支持 layer0 七个矩阵：
+
+- Q：M=896、K=896、bias；
+- K/V：M=128、K=896、bias；
+- O_proj：M=896、K=896、无 bias；
+- gate/up：M=4864、K=896、无 bias；
+- down_proj：M=896、K=4864、无 bias。
+
+控制器在一次矩阵执行中只加载一次 activation，随后逐行读取 weight/scale/bias，启动共享单行 engine，并每四行把四个 int64 Q28 合并为一个 256-bit DDR3 写拍。
+
+22 阶段 scheduler 对每个子阶段只发一个周期 start，等待明确 done/error，带逐阶段 watchdog 和粘滞错误状态，不按固定周期猜测完成。
+
+### 4. PDS Compile/Synthesize 结果
+
+三个独立子模块均已使用 PDS 2022.2-SP6.4、PGL50H/FBG484 正式 Compile/Synthesize 成功，日志无硬错误：
+
+| 子模块 | LUT | FF | DRM18K | APM |
+|---|---:|---:|---:|---:|
+| `shared_linear_engine` | 1557 | 3152 | 8 | 12 |
+| `runtime_linear_ctrl`（含 engine） | 2377 | 4038 | 8 | 12 |
+| 22 阶段 `transformer_block_scheduler` | 159 | 80 | 0 | 0 |
+
+当前综合脚本把子模块单独作为 top，因此未约束端口和 I/O 数量警告只用于语法/结构综合检查；这些结果不代表完整 Block PnR、多角时序或资源最终值。
+
+提交前边界审查还发现：down_proj 只有 76 个有效 groups，但 DDR3 每行按 10 个 256-bit scale beat 上传，即物理上会写入 80 个 word。共享 engine 初版把 scale RAM 深度定义为 76，虽然综合通过，却会让最后一拍的 4 个 padding word 越界。现已按历史已验证 down core 修正为 `MAX_SCALE_WORDS=((MAX_GROUPS+7)/8)*8=80`，新增源码断言测试并重新 PDS Compile/Synthesize；上表为修正后的最终资源。
+
+### 5. 软件回归
+
+- G2 固定清单：4/4 PASS；
+- G2 完整软件链确定性压力：1/1 PASS，seed=`20260818`；
+- G2 完整软件/地址/矩阵/量化目标测试：14/14 PASS；
+- 完整 `model_tools` 回归：156/156 PASS。
+
+## 三十九、G2.2 阶段开始时任务（后续已由第四十节更新）
+
+本节记录运行时量化 RTL 开始实现前的状态。当时已经有完整软件金标准、地址/矩阵/状态契约、共享 Linear engine、DDR3 行控制器和顶层 scheduler 骨架，但尚无 FPGA 运行时量化数据路。后续量化算术核心和 DDR3 controller 已建立，当前状态与唯一任务以第四十节为准。
+
+下一步必须按以下顺序执行：
+
+1. 实现 Q6.10 激活 max-abs、精确 RNE 除法和 symmetric INT8 输出；
+2. 实现 Q28 到 IEEE binary32 的逐位等价舍入、max-abs 和 symmetric INT8 输出；
+3. 实现 FP16 weight scale 解码以及 `activation_scale × weight_scale -> UQ4.28` 的精确 RNE/饱和；
+4. 建立量化 DDR3 controller，把 INT8 写入共享 scratch，把七个矩阵的 combined scale 写入冻结地址；
+5. 对 QKV、O_proj、gate/up、down 四类真实输入逐位比较全部 activation/scale；
+6. 量化 RTL 独立通过 PDS Compile/Synthesize/PnR/Timing 和真实板卡后，才允许连接完整 `transformer_block_ctrl/top`；
+7. 完整顶层仍需独立 PDS、多角时序、JTAG SRAM 和真实 hidden/random/boundary 逐位压力，在此之前不得进入阶段 H。
+
+
+## 四十、G2.3 运行时量化 RTL 与 DDR3 controller 骨架（2026-07-25）
+
+本轮继续完成 G2 收尾，把第三十九节中尚未存在的运行时量化数据路落实为可综合 RTL，并重新以最新源码执行软件回归和 PDS Compile/Synthesize。当前仍未宣称完整 Transformer Block、量化数值闭环、PnR、位流或真实板卡已经通过。
+
+### 1. 运行时量化算术核心
+
+新增 RTL：
+
+```text
+transformer_block_g2/rtl/unsigned_divider_rne.v
+transformer_block_g2/rtl/runtime_q10_activation_quantizer.v
+transformer_block_g2/rtl/q28_to_binary32.v
+transformer_block_g2/rtl/runtime_q28_activation_quantizer.v
+transformer_block_g2/rtl/runtime_fp16_scale_builder.v
+```
+
+关键数值规则：
+
+- Q6.10 输入执行 `round_rne(abs(x) * 127 / max_abs)`，恢复符号后输出 symmetric INT8 `[-127,127]`；
+- Q28 输入严格复现原软件的 `int64 -> binary64 -> /2^28 -> binary32` 双重 RNE，再按 binary32 mantissa/exponent 比值生成 INT8；
+- 全零向量激活全部为 0，activation scale 固定为 1.0；
+- FP16 weight scale 被精确解码为二进制有理数，与 activation scale 组合后生成 UQ4.28，使用 ties-to-even 和显式 uint32 饱和；
+- 通用恢复除法器在最终商上执行 RNE，不使用近似除法。
+
+软件侧验证：
+
+- `unsigned_divider_rne` 状态机等价镜像随机 `60000/60000 PASS`；
+- Q28 双重舍入对 10000 组随机 signed int64 和 11 个关键边界逐位匹配 NumPy；
+- `test_runtime_linear_quant_reference.py` 当前 `7/7 PASS`，覆盖 Q10/Q28、全零、ties-to-even、双重舍入和七个真实矩阵全部 combined scale。
+
+### 2. DDR3 可调用量化 controller
+
+新增 RTL：
+
+```text
+transformer_block_g2/rtl/runtime_activation_quantizer_ctrl.v
+transformer_block_g2/rtl/runtime_scale_builder_ctrl.v
+transformer_block_g2/rtl/runtime_quantizer_ctrl.v
+transformer_block_g2/rtl/runtime_quantizer_q28_top.v
+```
+
+已实现的结构能力：
+
+- 从 256-bit DDR3 beat 解包 Q6.10 或 Q28 源向量；
+- 驱动相应 activation quantizer，并把 32 个 INT8 重新打包为一个 256-bit beat 写回共享 `linear_activation_int8`；
+- 连续读取原始 FP16 weight scale，驱动 UQ4.28 scale builder；
+- 对每行 14 个有效 group 写出 16 个 word，对 76 个有效 group 写出 80 个 word，显式补齐 padding；
+- 顺序调度 activation 和 scale 两段，输出 busy/done/error、失败阶段、max metadata 和饱和计数；
+- Q28 参数分支由 `runtime_quantizer_q28_top.v` 固化，避免只综合默认 Q10 generate 分支。
+
+### 3. 最新 PDS Compile/Synthesize
+
+使用 PDS 2022.2-SP6.4、PGL50H-6IFBG484，以最新源码重新执行两类完整量化 DDR3 controller 的 Compile/Synthesize，均完成且日志无硬错误：
+
+| 子模块 | LUT | FF | DRM18K | APM |
+|---|---:|---:|---:|---:|
+| Q6.10 `runtime_quantizer_ctrl` | 3494 | 2773 | 8 | 2 |
+| Q28 `runtime_quantizer_q28_top` | 6500 | 3301 | 32 | 2 |
+
+当前脚本仍把内部 AXI/controller 接口直接暴露为独立 top，因此存在未约束端口、I/O 数量超过封装、宽除法器 fanout 和 constant-probe 警告。这些结果只证明 RTL 可解析和可综合，不代表完整顶层可放置、100 MHz 时序通过或数值正确。
+
+### 4. 最新软件与契约回归
+
+在全部最新代码和文档更新前重新执行：
+
+- Python `compileall`：PASS；
+- 完整 `model_tools`：`157/157 PASS`；
+- G2 固定清单：`4/4 PASS`；
+- G2 完整软件链确定性压力：`1/1 PASS`，seed=`20260818`；
+- `git diff --check`：PASS。
+
+### 5. 当前真实边界与唯一下一任务
+
+运行时量化 RTL 和 DDR3 controller 已经存在，但目前尚无 RTL 仿真或真实 FPGA 证据证明其输出与软件参考逐位一致，也尚未完成独立 PnR/多角时序、位流和 JTAG SRAM。因此 G2 复选框仍不得勾选，不能宣称完整 Block 已完成。
+
+当前唯一下一任务：
+
+1. 为 Q6.10/Q28 量化 DDR3 controller 建立自动数值闭环；
+2. 使用真实 QKV、O_proj、gate/up、down 输入逐项比较全部 INT8、max metadata 和 UQ4.28；
+3. 检查 14→16、76→80 padding、burst 分段、读写长度和目标地址；
+4. 完成量化子系统独立 PDS Map/PnR/多角 Timing/Bitstream 和 JTAG SRAM 板卡压力；
+5. 通过后再连接完整 `transformer_block_ctrl.v`、`transformer_block_top.v`、DDR3 仲裁和 host 工具；
+6. 完整 Block 单独通过前不得进入 28 层调度、LM Head 或文本生成。
