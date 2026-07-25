@@ -233,6 +233,8 @@ class TransformerBlockReferenceTests(unittest.TestCase):
         self.assertIn("module transformer_block_scheduler", scheduler_source)
 
         divider_source = (RTL_ROOT / "unsigned_divider_rne.v").read_text(encoding="utf-8")
+        self.assertIn("ST_ITER_PREP", divider_source)
+        self.assertIn("ST_ITER_UPDATE", divider_source)
         self.assertIn("doubled_remainder", divider_source)
         self.assertIn("next_quotient[0]", divider_source)
         self.assertIn("module unsigned_divider_rne", divider_source)
@@ -247,12 +249,22 @@ class TransformerBlockReferenceTests(unittest.TestCase):
         self.assertIn("binary32_exponent_msb + 8'd99", q28_convert_source)
         self.assertIn("module q28_to_binary32", q28_convert_source)
 
+        q28_seq_source = (RTL_ROOT / "q28_to_binary32_sequential.v").read_text(encoding="utf-8")
+        self.assertIn("ST_CAPTURE", q28_seq_source)
+        self.assertIn("input_reg", q28_seq_source)
+        self.assertIn("module q28_to_binary32_sequential", q28_seq_source)
+
         q28_source = (RTL_ROOT / "runtime_q28_activation_quantizer.v").read_text(encoding="utf-8")
+        self.assertIn("ST_LOAD_UPDATE", q28_source)
+        self.assertIn("q28_to_binary32_sequential", q28_source)
         self.assertIn("exponent_difference_signed", q28_source)
-        self.assertIn("source_mantissa_wire * 7'd127", q28_source)
+        self.assertIn("ratio_numerator_base", q28_source)
+        self.assertIn("ST_RATIO_SHIFT", q28_source)
         self.assertIn(".WIDTH(96)", q28_source)
 
         scale_source = (RTL_ROOT / "runtime_fp16_scale_builder.v").read_text(encoding="utf-8")
+        self.assertIn("ST_SHIFT_INIT", scale_source)
+        self.assertIn("ST_SHIFT_LOOP", scale_source)
         self.assertIn("? -11'sd24", scale_source)
         self.assertIn("effective_denominator_base = all_zero_reg ? 8'd1 : 8'd127", scale_source)
         self.assertIn("32'hffff_ffff", scale_source)

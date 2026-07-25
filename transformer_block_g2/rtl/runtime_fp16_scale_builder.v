@@ -9,6 +9,8 @@
 //
 // max_abs_binary32 使用精确分量：mantissa * 2^exponent。
 // 输入 weight scale 必须是有限正 FP16；输出显式饱和到 uint32。
+// 乘积准备、指数对齐与除法均采用多周期结构，避免在 100 MHz 用户时钟
+// 内串联乘法器、指数加法和 96 位可变移位。
 module runtime_fp16_scale_builder (
     input  wire                 clk,
     input  wire                 rst_n,
@@ -30,12 +32,14 @@ module runtime_fp16_scale_builder (
     output wire [2:0]           debug_state
 );
 
-localparam [2:0] ST_IDLE      = 3'd0;
-localparam [2:0] ST_PREPARE   = 3'd1;
-localparam [2:0] ST_DIV_START = 3'd2;
-localparam [2:0] ST_DIV_WAIT  = 3'd3;
-localparam [2:0] ST_OUTPUT    = 3'd4;
-localparam [2:0] ST_ERROR     = 3'd7;
+localparam [2:0] ST_IDLE       = 3'd0;
+localparam [2:0] ST_PREPARE    = 3'd1;
+localparam [2:0] ST_SHIFT_INIT = 3'd2;
+localparam [2:0] ST_SHIFT_LOOP = 3'd3;
+localparam [2:0] ST_DIV_START  = 3'd4;
+localparam [2:0] ST_DIV_WAIT   = 3'd5;
+localparam [2:0] ST_OUTPUT     = 3'd6;
+localparam [2:0] ST_ERROR      = 3'd7;
 
 localparam [7:0] ERR_FP16       = 8'h01;
 localparam [7:0] ERR_MAX_META   = 8'h02;
@@ -48,6 +52,10 @@ reg [15:0] scale_reg;
 reg all_zero_reg;
 reg [23:0] max_mantissa_reg;
 reg signed [9:0] max_exponent_reg;
+reg [34:0] base_product_reg;
+reg [7:0] denominator_base_reg;
+reg shift_negative_reg;
+reg [6:0] shift_count_reg;
 reg [95:0] numerator_reg;
 reg [95:0] denominator_reg;
 reg divider_start;
@@ -77,12 +85,6 @@ wire shift_negative = effective_shift[10];
 wire [10:0] shift_magnitude =
     shift_negative ? (~effective_shift + 1'b1) : effective_shift;
 wire shift_too_large = shift_magnitude >= 11'd96;
-wire [95:0] numerator_wire = shift_negative
-    ? {{61{1'b0}}, effective_base_product}
-    : ({{61{1'b0}}, effective_base_product} << shift_magnitude);
-wire [95:0] denominator_wire = shift_negative
-    ? ({{88{1'b0}}, effective_denominator_base} << shift_magnitude)
-    : {{88{1'b0}}, effective_denominator_base};
 
 wire divider_busy;
 wire divider_done;
@@ -118,6 +120,10 @@ always @(posedge clk or negedge rst_n) begin
         all_zero_reg            <= 1'b0;
         max_mantissa_reg        <= 24'd0;
         max_exponent_reg        <= 10'sd0;
+        base_product_reg        <= 35'd0;
+        denominator_base_reg    <= 8'd0;
+        shift_negative_reg      <= 1'b0;
+        shift_count_reg         <= 7'd0;
         numerator_reg           <= 96'd0;
         denominator_reg         <= 96'd0;
         divider_start           <= 1'b0;
@@ -143,6 +149,7 @@ always @(posedge clk or negedge rst_n) begin
                 end
             end
 
+            // 这一拍只完成 FP16 解码、35 位乘积和指数计算并落寄存器。
             ST_PREPARE: begin
                 if (!fp16_valid_positive) begin
                     error      <= 1'b1;
@@ -157,9 +164,35 @@ always @(posedge clk or negedge rst_n) begin
                     error_code <= ERR_SHIFT;
                     state      <= ST_ERROR;
                 end else begin
-                    numerator_reg   <= numerator_wire;
-                    denominator_reg <= denominator_wire;
+                    base_product_reg     <= effective_base_product;
+                    denominator_base_reg <= effective_denominator_base;
+                    shift_negative_reg   <= shift_negative;
+                    shift_count_reg      <= shift_magnitude[6:0];
+                    state                <= ST_SHIFT_INIT;
+                end
+            end
+
+            // 先装载未移位的分子/分母；动态移位改为后续逐拍左移。
+            ST_SHIFT_INIT: begin
+                numerator_reg   <= {{61{1'b0}}, base_product_reg};
+                denominator_reg <= {{88{1'b0}}, denominator_base_reg};
+                if (shift_count_reg == 7'd0)
+                    state <= ST_DIV_START;
+                else
+                    state <= ST_SHIFT_LOOP;
+            end
+
+            ST_SHIFT_LOOP: begin
+                if (shift_negative_reg)
+                    denominator_reg <= denominator_reg << 1;
+                else
+                    numerator_reg <= numerator_reg << 1;
+
+                if (shift_count_reg == 7'd1) begin
+                    shift_count_reg <= 7'd0;
                     state           <= ST_DIV_START;
+                end else begin
+                    shift_count_reg <= shift_count_reg - 1'b1;
                 end
             end
 
@@ -205,5 +238,7 @@ always @(posedge clk or negedge rst_n) begin
         endcase
     end
 end
+
+wire _unused = &{1'b0, divider_busy, divider_remainder};
 
 endmodule

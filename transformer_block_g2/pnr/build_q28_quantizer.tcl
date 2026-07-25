@@ -3,6 +3,7 @@
 
 add_design "../rtl/unsigned_divider_rne.v"
 add_design "../rtl/q28_to_binary32.v"
+add_design "../rtl/q28_to_binary32_sequential.v"
 add_design "../rtl/runtime_q28_activation_quantizer.v"
 
 set_arch -family Logos -device PGL50H -speedgrade -6 -package FBG484

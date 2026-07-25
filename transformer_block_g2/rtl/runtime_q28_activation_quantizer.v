@@ -7,6 +7,8 @@
 //   q = signed RNE(abs(binary32_x) * 127 / max_abs_binary32)
 //
 // 输入/输出是单元素 valid/ready 流；DDR3 adapter 负责 256-bit 解包和打包。
+// Q28->binary32 与动态指数对齐均采用多周期顺序实现，满足 DDR3 100 MHz
+// 用户时钟，同时保持旧软件的两次 RNE 契约不变。
 module runtime_q28_activation_quantizer #(
     parameter integer MAX_LENGTH = 4864,
     parameter integer INDEX_WIDTH = 13
@@ -40,23 +42,29 @@ module runtime_q28_activation_quantizer #(
     output wire [3:0]                   debug_state
 );
 
-localparam [3:0] ST_IDLE       = 4'd0;
-localparam [3:0] ST_LOAD       = 4'd1;
-localparam [3:0] ST_LOADED     = 4'd2;
-localparam [3:0] ST_PREP_MAX   = 4'd3;
-localparam [3:0] ST_READ       = 4'd4;
-localparam [3:0] ST_RATIO_PREP = 4'd5;
-localparam [3:0] ST_DIV_START  = 4'd6;
-localparam [3:0] ST_DIV_WAIT   = 4'd7;
-localparam [3:0] ST_OUTPUT     = 4'd8;
-localparam [3:0] ST_FINISH     = 4'd9;
-localparam [3:0] ST_ERROR      = 4'd15;
+localparam [3:0] ST_IDLE               = 4'd0;
+localparam [3:0] ST_LOAD               = 4'd1;
+localparam [3:0] ST_LOADED             = 4'd2;
+localparam [3:0] ST_MAX_CONVERT_START  = 4'd3;
+localparam [3:0] ST_MAX_CONVERT_WAIT   = 4'd4;
+localparam [3:0] ST_READ               = 4'd5;
+localparam [3:0] ST_SOURCE_CONVERT_START = 4'd6;
+localparam [3:0] ST_SOURCE_CONVERT_WAIT  = 4'd7;
+localparam [3:0] ST_RATIO_PREP         = 4'd8;
+localparam [3:0] ST_RATIO_SHIFT        = 4'd9;
+localparam [3:0] ST_DIV_START          = 4'd10;
+localparam [3:0] ST_DIV_WAIT           = 4'd11;
+localparam [3:0] ST_OUTPUT             = 4'd12;
+localparam [3:0] ST_FINISH             = 4'd13;
+localparam [3:0] ST_LOAD_UPDATE        = 4'd14;
+localparam [3:0] ST_ERROR              = 4'd15;
 
 localparam [7:0] ERR_LENGTH       = 8'h01;
 localparam [7:0] ERR_LOAD_COUNT   = 8'h02;
 localparam [7:0] ERR_START_ORDER  = 8'h03;
 localparam [7:0] ERR_EXPONENT     = 8'h04;
 localparam [7:0] ERR_DIVIDER      = 8'h05;
+localparam [7:0] ERR_CONVERTER    = 8'h06;
 localparam [7:0] ERR_INTERNAL     = 8'hff;
 
 reg [3:0] state;
@@ -66,57 +74,64 @@ reg [INDEX_WIDTH-1:0] load_count;
 reg [INDEX_WIDTH-1:0] quant_index;
 reg [63:0] max_abs_raw;
 reg signed [63:0] source_reg;
+reg signed [63:0] load_source_reg;
+reg load_source_last_reg;
+reg source_sign_reg;
+reg source_zero_reg;
+reg [23:0] source_mantissa_reg;
+reg signed [9:0] source_exponent_reg;
 reg [95:0] divider_numerator_reg;
 reg [95:0] divider_denominator_reg;
+reg [95:0] denominator_work_reg;
+reg [6:0] denominator_shift_count;
 reg divider_start;
 
-wire [63:0] source_magnitude_wire = source_q28[63]
-    ? (~source_q28[63:0] + 1'b1)
-    : source_q28[63:0];
+wire [63:0] source_magnitude_wire = load_source_reg[63]
+    ? (~load_source_reg[63:0] + 1'b1)
+    : load_source_reg[63:0];
 wire [63:0] loaded_max_candidate =
     (source_magnitude_wire > max_abs_raw) ? source_magnitude_wire : max_abs_raw;
 wire vector_length_supported =
     (vector_length == 13'd896) || (vector_length == 13'd4864);
 wire output_handshake = activation_valid && activation_ready;
 
-wire max_sign_unused;
-wire max_zero;
-wire [23:0] max_mantissa_wire;
-wire signed [9:0] max_exponent_wire;
-wire [31:0] max_bits_wire;
-wire source_sign_wire;
-wire source_zero_wire;
-wire [23:0] source_mantissa_wire;
-wire signed [9:0] source_exponent_wire;
-wire [31:0] source_bits_unused;
+wire converter_start =
+    (state == ST_MAX_CONVERT_START) ||
+    (state == ST_SOURCE_CONVERT_START);
+wire signed [63:0] converter_input =
+    (state == ST_MAX_CONVERT_START) ? $signed(max_abs_raw) : source_reg;
+wire converter_busy;
+wire converter_done;
+wire converter_sign;
+wire converter_zero;
+wire [23:0] converter_mantissa;
+wire signed [9:0] converter_exponent;
+wire [31:0] converter_bits;
 
-q28_to_binary32 u_max_q28_to_binary32 (
-    .q28_value          ($signed(max_abs_raw)),
-    .sign               (max_sign_unused),
-    .zero               (max_zero),
-    .mantissa           (max_mantissa_wire),
-    .component_exponent (max_exponent_wire),
-    .binary32_bits      (max_bits_wire)
-);
-
-q28_to_binary32 u_source_q28_to_binary32 (
-    .q28_value          (source_reg),
-    .sign               (source_sign_wire),
-    .zero               (source_zero_wire),
-    .mantissa           (source_mantissa_wire),
-    .component_exponent (source_exponent_wire),
-    .binary32_bits      (source_bits_unused)
+q28_to_binary32_sequential u_q28_to_binary32_sequential (
+    .clk                (clk),
+    .rst_n              (rst_n),
+    .start              (converter_start),
+    .q28_value          (converter_input),
+    .busy               (converter_busy),
+    .done               (converter_done),
+    .sign               (converter_sign),
+    .zero               (converter_zero),
+    .mantissa           (converter_mantissa),
+    .component_exponent (converter_exponent),
+    .binary32_bits      (converter_bits)
 );
 
 wire signed [10:0] exponent_difference_signed =
-    $signed(max_exponent_binary32) - $signed(source_exponent_wire);
+    $signed(max_exponent_binary32) - $signed(source_exponent_reg);
 wire exponent_difference_negative = exponent_difference_signed[10];
 wire [10:0] exponent_difference = exponent_difference_signed[10:0];
 wire exponent_difference_too_large = exponent_difference >= 11'd72;
-wire [30:0] ratio_numerator_base = source_mantissa_wire * 7'd127;
-wire [95:0] ratio_numerator_wire = {{65{1'b0}}, ratio_numerator_base};
-wire [95:0] ratio_denominator_wire =
-    {{72{1'b0}}, max_mantissa_binary32} << exponent_difference;
+wire [30:0] source_mantissa_extended = {7'd0, source_mantissa_reg};
+wire [30:0] ratio_numerator_base =
+    (source_mantissa_extended << 7) - source_mantissa_extended;
+wire [95:0] ratio_denominator_base =
+    {{72{1'b0}}, max_mantissa_binary32};
 
 wire divider_busy;
 wire divider_done;
@@ -152,8 +167,16 @@ always @(posedge clk or negedge rst_n) begin
         quant_index              <= {INDEX_WIDTH{1'b0}};
         max_abs_raw              <= 64'd0;
         source_reg               <= 64'sd0;
+        load_source_reg          <= 64'sd0;
+        load_source_last_reg     <= 1'b0;
+        source_sign_reg          <= 1'b0;
+        source_zero_reg          <= 1'b1;
+        source_mantissa_reg      <= 24'd0;
+        source_exponent_reg      <= 10'sd0;
         divider_numerator_reg    <= 96'd0;
         divider_denominator_reg  <= 96'd0;
+        denominator_work_reg     <= 96'd0;
+        denominator_shift_count  <= 7'd0;
         divider_start            <= 1'b0;
         activation_valid         <= 1'b0;
         activation_index         <= {INDEX_WIDTH{1'b0}};
@@ -201,29 +224,38 @@ always @(posedge clk or negedge rst_n) begin
 
             ST_LOAD: begin
                 if (source_valid) begin
+                    // 先锁存输入和 last，再于下一拍执行 64 位 abs/max 比较；
+                    // 这样 DDR/RAM 输出不会与两条 64 位 carry chain 串在同一周期。
                     source_mem[load_count] <= source_q28;
-                    max_abs_raw <= loaded_max_candidate;
-                    if (source_magnitude_wire != 64'd0)
-                        all_zero <= 1'b0;
+                    load_source_reg        <= source_q28;
+                    load_source_last_reg   <= source_last;
+                    state                  <= ST_LOAD_UPDATE;
+                end
+            end
 
-                    if (source_last) begin
-                        if (load_count + 1'b1 != length_reg) begin
-                            error      <= 1'b1;
-                            error_code <= ERR_LOAD_COUNT;
-                            busy       <= 1'b0;
-                            state      <= ST_ERROR;
-                        end else begin
-                            load_complete <= 1'b1;
-                            state         <= ST_LOADED;
-                        end
-                    end else if (load_count + 1'b1 == length_reg) begin
+            ST_LOAD_UPDATE: begin
+                max_abs_raw <= loaded_max_candidate;
+                if (source_magnitude_wire != 64'd0)
+                    all_zero <= 1'b0;
+
+                if (load_source_last_reg) begin
+                    if (load_count + 1'b1 != length_reg) begin
                         error      <= 1'b1;
                         error_code <= ERR_LOAD_COUNT;
                         busy       <= 1'b0;
                         state      <= ST_ERROR;
                     end else begin
-                        load_count <= load_count + 1'b1;
+                        load_complete <= 1'b1;
+                        state         <= ST_LOADED;
                     end
+                end else if (load_count + 1'b1 == length_reg) begin
+                    error      <= 1'b1;
+                    error_code <= ERR_LOAD_COUNT;
+                    busy       <= 1'b0;
+                    state      <= ST_ERROR;
+                end else begin
+                    load_count <= load_count + 1'b1;
+                    state      <= ST_LOAD;
                 end
             end
 
@@ -235,24 +267,60 @@ always @(posedge clk or negedge rst_n) begin
                     state      <= ST_ERROR;
                 end else if (quantize_start) begin
                     quant_index <= {INDEX_WIDTH{1'b0}};
-                    state       <= ST_PREP_MAX;
+                    state       <= ST_MAX_CONVERT_START;
                 end
             end
 
-            ST_PREP_MAX: begin
-                max_mantissa_binary32 <= max_mantissa_wire;
-                max_exponent_binary32 <= max_zero ? 10'sd0 : max_exponent_wire;
-                max_abs_binary32_bits <= max_zero ? 32'd0 : {1'b0, max_bits_wire[30:0]};
-                state                 <= ST_READ;
+            ST_MAX_CONVERT_START: begin
+                if (converter_busy) begin
+                    error      <= 1'b1;
+                    error_code <= ERR_CONVERTER;
+                    busy       <= 1'b0;
+                    state      <= ST_ERROR;
+                end else begin
+                    state <= ST_MAX_CONVERT_WAIT;
+                end
+            end
+
+            ST_MAX_CONVERT_WAIT: begin
+                if (converter_done) begin
+                    max_mantissa_binary32 <= converter_mantissa;
+                    max_exponent_binary32 <= converter_zero
+                        ? 10'sd0 : converter_exponent;
+                    max_abs_binary32_bits <= converter_zero
+                        ? 32'd0 : {1'b0, converter_bits[30:0]};
+                    state <= ST_READ;
+                end
             end
 
             ST_READ: begin
                 source_reg <= source_mem[quant_index];
-                state      <= ST_RATIO_PREP;
+                state      <= ST_SOURCE_CONVERT_START;
+            end
+
+            ST_SOURCE_CONVERT_START: begin
+                if (converter_busy) begin
+                    error      <= 1'b1;
+                    error_code <= ERR_CONVERTER;
+                    busy       <= 1'b0;
+                    state      <= ST_ERROR;
+                end else begin
+                    state <= ST_SOURCE_CONVERT_WAIT;
+                end
+            end
+
+            ST_SOURCE_CONVERT_WAIT: begin
+                if (converter_done) begin
+                    source_sign_reg     <= converter_sign;
+                    source_zero_reg     <= converter_zero;
+                    source_mantissa_reg <= converter_mantissa;
+                    source_exponent_reg <= converter_exponent;
+                    state               <= ST_RATIO_PREP;
+                end
             end
 
             ST_RATIO_PREP: begin
-                if (all_zero || source_zero_wire) begin
+                if (all_zero || source_zero_reg) begin
                     activation_index <= quant_index;
                     activation_int8  <= 8'sd0;
                     activation_last  <= (quant_index + 1'b1 == length_reg);
@@ -264,9 +332,26 @@ always @(posedge clk or negedge rst_n) begin
                     busy       <= 1'b0;
                     state      <= ST_ERROR;
                 end else begin
-                    divider_numerator_reg   <= ratio_numerator_wire;
-                    divider_denominator_reg <= ratio_denominator_wire;
-                    state                   <= ST_DIV_START;
+                    divider_numerator_reg <= {{65{1'b0}}, ratio_numerator_base};
+                    denominator_work_reg  <= ratio_denominator_base;
+                    denominator_shift_count <= exponent_difference[6:0];
+                    if (exponent_difference == 11'd0) begin
+                        divider_denominator_reg <= ratio_denominator_base;
+                        state <= ST_DIV_START;
+                    end else begin
+                        state <= ST_RATIO_SHIFT;
+                    end
+                end
+            end
+
+            ST_RATIO_SHIFT: begin
+                denominator_work_reg <= denominator_work_reg << 1;
+                if (denominator_shift_count == 7'd1) begin
+                    divider_denominator_reg <= denominator_work_reg << 1;
+                    denominator_shift_count <= 7'd0;
+                    state <= ST_DIV_START;
+                end else begin
+                    denominator_shift_count <= denominator_shift_count - 1'b1;
                 end
             end
 
@@ -287,7 +372,7 @@ always @(posedge clk or negedge rst_n) begin
                         state      <= ST_ERROR;
                     end else begin
                         activation_index <= quant_index;
-                        activation_int8 <= source_sign_wire
+                        activation_int8 <= source_sign_reg
                             ? -$signed({1'b0, divider_quotient[6:0]})
                             :  $signed({1'b0, divider_quotient[6:0]});
                         activation_last  <= (quant_index + 1'b1 == length_reg);
@@ -311,8 +396,8 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             ST_FINISH: begin
-                busy <= 1'b0;
-                done <= 1'b1;
+                busy  <= 1'b0;
+                done  <= 1'b1;
                 state <= ST_IDLE;
             end
 
@@ -331,5 +416,7 @@ always @(posedge clk or negedge rst_n) begin
         endcase
     end
 end
+
+wire _unused = &{1'b0, converter_busy, divider_busy, divider_remainder};
 
 endmodule

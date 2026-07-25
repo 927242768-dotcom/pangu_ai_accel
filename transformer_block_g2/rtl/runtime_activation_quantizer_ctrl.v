@@ -164,6 +164,11 @@ generate
         wire [15:0] q10_max_abs;
         wire [23:0] q10_max_mantissa;
         wire signed [9:0] q10_max_exponent;
+        wire signed [10:0] q10_ieee_exponent_signed =
+            $signed(q10_max_exponent) + 11'sd150;
+        wire [31:0] q10_max_bits = q10_all_zero ? 32'd0 : {
+            1'b0, q10_ieee_exponent_signed[7:0], q10_max_mantissa[22:0]
+        };
 
         runtime_q10_activation_quantizer u_quantizer (
             .clk                     (clk),
@@ -204,7 +209,7 @@ generate
         assign selected_max_abs_q10 = q10_max_abs;
         assign selected_max_mantissa = q10_max_mantissa;
         assign selected_max_exponent = q10_max_exponent;
-        assign selected_max_bits = 32'd0;
+        assign selected_max_bits = q10_max_bits;
     end else begin : gen_q28
         wire q28_activation_valid;
         wire signed [7:0] q28_activation_int8;

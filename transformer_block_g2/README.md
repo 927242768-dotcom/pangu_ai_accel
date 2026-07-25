@@ -28,31 +28,29 @@ G2 必须新建独立调度、地址表、状态机和握手边界，不覆盖�
 
 ## 2. 当前状态
 
-当前已完成 **G2.1 软件全链参考与集成契约**，并推进到 **G2.2 可综合硬件骨架**；仍未宣称完整 Block 硬件完成：
+当前已完成 **G2 软件全链参考、运行时量化硬件与独立板级验收**；仍未宣称完整 Block 硬件完成：
 
-- `model_tools/transformer_block_reference.py` 已从同一 hidden state 连贯执行完整 layer0 Block。
-- `model_tools/runtime_linear_quant_reference.py` 已把原主机侧 Q6.10/Q28→binary32→symmetric INT8、FP16 weight scale→UQ4.28 combined scale 改写为精确整数/二进制有理数规格；Q28 的 int64→binary64→binary32 双重 RNE 已对 10000 组随机值和 11 个关键边界逐位匹配 NumPy。
-- 顶层现显式包含 22 个计算阶段，其中四个为 `QKV/OPROJ/GATE_UP/DOWN` 运行时量化；加上 IDLE/DONE/ERROR 共 25 个状态 ID。
+- `model_tools/transformer_block_reference.py` 已从同一 hidden state 连贯执行完整 layer0 Block，四组固定最终输出与已验证 G1 第二处残差完全一致。
+- 顶层契约显式包含 22 个计算阶段，其中四个为 `QKV/OPROJ/GATE_UP/DOWN` 运行时量化；加上 IDLE/DONE/ERROR 共 25 个状态 ID。
 - 已冻结 28 个 scratch/查表区域、24 个 Linear 参数/scale 区、七个矩阵调用描述和 F3 KV Cache 地址复用规则。
-- 已建立 64 字节动态执行头、hidden、RoPE trig、历史 K/V 的上传载荷格式。
-- 已建立四组真实固定 query/count=`0/1、1/2、5/6、15/16` 的关键中间张量 SHA256；最终 Block 输出与已验证 G1 第二处残差结果完全一致；最新固定清单 `4/4 PASS`、完整软件链压力 `1/1 PASS`、完整 `model_tools` 回归 `157/157 PASS`。
-- 已实现并通过 PDS Compile/Synthesize 的共享 Linear、DDR3 Linear controller、22 阶段 scheduler、通用 RNE 除法器、Q6.10 激活量化器、Q28→binary32→INT8 激活量化器、FP16→UQ4.28 scale builder，以及 Q6.10/Q28 两类量化 DDR3 controller/beat adapter。
-- 量化 controller 已能从 DDR3 解包 Q6.10/Q28、写回 packed INT8、读取 FP16 scale，并按 14→16 或 76→80 padding 写回 UQ4.28；当前仍缺 RTL/DDR3 数值逐位比较、独立 PnR/时序/板卡闭环、完整 DDR3 仲裁/顶层连接、完整位流和真实 Block 板卡结果。
+- Q6.10/Q28 运行时量化子系统已经建立自动逐位闭环：同一验证位流核对全部 INT8、max metadata、全部 UQ4.28、14→16/76→80 padding，以及 source/raw-scale/activation/combined-scale 的 AXI 地址、命令数、beat 数和 burst。
+- 七个真实矩阵 `q/k/v/o/gate/up/down` 已真实上板 `7/7 PASS`；Q6.10 随机/边界 `100/100 PASS`，Q28 随机/边界 `24/24 PASS`，seed=`20260819`。
+- 最新完整 `model_tools` 回归 `165/165 PASS`；量化七矩阵软件固定清单 `7/7 PASS`，地址/burst/padding 事务压力 `1000/1000 PASS`。
+- 量化验证工程已完整通过 PDS Compile、Synthesize、Device Map、PnR、Timing 和 Bitstream；慢/快角 setup TNS 与 hold THS 全部为 0，并已通过 JTAG SRAM 下载和真实板卡压力。
+- 当前尚缺的是完整 Block 的统一 DDR3 仲裁、22 阶段 controller/top、完整中间张量与最终 `[896]` 输出的连贯板级闭环。
 
-独立子模块综合资源仅用于结构可行性检查，不等同完整 Block 资源或时序：
+量化验证工程最终资源和时序：
 
-| RTL 单元 | LUT | FF | DRM18K | APM |
-|---|---:|---:|---:|---:|
-| shared Linear engine | 1557 | 3152 | 8 | 12 |
-| runtime Linear DDR3 controller（含 engine） | 2377 | 4038 | 8 | 12 |
-| 22 阶段 scheduler | 159 | 80 | 0 | 0 |
-| Q6.10→INT8 activation quantizer | 513 | 290 | 8 | 0 |
-| FP16→UQ4.28 scale builder | 1280 | 778 | 0 | 2 |
-| Q28→binary32→INT8 activation quantizer | 3508 | 802 | 32 | 0 |
-| Q6.10 runtime quantizer DDR3 controller | 3494 | 2773 | 8 | 2 |
-| Q28 runtime quantizer DDR3 controller | 6500 | 3301 | 32 | 2 |
-
-这些单元均无 PDS 硬错误，但宽除法器/可变移位在独立综合时存在 constant-probe 与 fanout 警告；当前只证明可综合，不代表数值已由 RTL 仿真验证，也不代表 100 MHz PnR 时序通过。
+| 项目 | 结果 |
+|---|---|
+| LUT / FF | 16370 / 13887 |
+| DRM18K / APM / I/O | 40 / 8 / 79 |
+| Slow `ddrphy_clkin` setup | WNS=`+0.187 ns`，TNS=0 |
+| Slow `ddrphy_clkin` hold | WHS=`+0.171 ns`，THS=0 |
+| Fast `ddrphy_clkin` setup | WNS=`+2.908 ns`，TNS=0 |
+| Fast `ddrphy_clkin` hold | WHS=`+0.101 ns`，THS=0 |
+| Timing 总结 | `All Constraints Met` |
+| 位流 SHA256 | `220b771afbf8ea8d99806f3de27512748e2bd54913b1cc5e1f4a894647314236` |
 
 固定输出 SHA256：
 
@@ -71,8 +69,12 @@ G2 必须新建独立调度、地址表、状态机和握手边界，不覆盖�
 model_tools/transformer_block_reference.py
 model_tools/runtime_linear_quant_reference.py
 model_tools/transformer_block_g2_reference.json
+model_tools/runtime_quantizer_validation.py
+model_tools/runtime_quantizer_g2_reference.json
 model_tools/test_transformer_block_reference.py
 model_tools/test_runtime_linear_quant_reference.py
+model_tools/test_runtime_quantizer_validation.py
+tools/pangu_runtime_quantizer_host.py
 ```
 
 验证命令：
@@ -81,10 +83,12 @@ model_tools/test_runtime_linear_quant_reference.py
 python -m model_tools.transformer_block_reference summary
 python -m model_tools.transformer_block_reference verify
 python -m model_tools.transformer_block_reference --rounds 1 --seed 20260818 stress
-python -m unittest model_tools.test_transformer_block_reference model_tools.test_runtime_linear_quant_reference
+python -m model_tools.runtime_quantizer_validation verify
+python -m model_tools.runtime_quantizer_validation stress --rounds 1000 --seed 20260819
+python -m unittest discover -s model_tools -p "test_*.py"
 ```
 
-完整软件压力函数当前用于检查不同 hidden seed、query/window 和动态载荷的确定性。它不替代最终要求的 1000 轮软件压力与真实 FPGA 随机/边界压力。
+完整 Block 软件压力函数用于检查不同 hidden seed、query/window 和动态载荷的确定性。量化子系统已经额外完成七矩阵固定清单、1000 轮地址/burst/padding 软件压力，以及 Q6.10/Q28 真实 FPGA 随机/边界压力；这些结果不替代后续完整 Block 的板级验收。
 
 ## 4. DDR3 地址原则
 
@@ -130,12 +134,16 @@ rtl/transformer_block_scheduler.v
 rtl/unsigned_divider_rne.v
 rtl/runtime_q10_activation_quantizer.v
 rtl/q28_to_binary32.v
+rtl/q28_to_binary32_sequential.v
 rtl/runtime_q28_activation_quantizer.v
 rtl/runtime_fp16_scale_builder.v
 rtl/runtime_activation_quantizer_ctrl.v
 rtl/runtime_scale_builder_ctrl.v
 rtl/runtime_quantizer_ctrl.v
 rtl/runtime_quantizer_q28_top.v
+rtl/runtime_quantizer_trace_checker.v
+rtl/runtime_quantizer_validation_ctrl.v
+rtl/runtime_quantizer_validation_top.v
 rtl/transformer_block_contract.vh
 pnr/build_shared_linear.tcl
 pnr/build_runtime_linear.tcl
@@ -145,6 +153,9 @@ pnr/build_q28_quantizer.tcl
 pnr/build_scale_builder.tcl
 pnr/build_runtime_quantizer.tcl
 pnr/build_runtime_quantizer_q28.tcl
+pnr/build_runtime_quantizer_validation_ctrl.tcl
+pnr/build_runtime_quantizer_validation.tcl
+pnr/program_runtime_quantizer_validation_sram.tcl
 ```
 
 共享 Linear 数据路已覆盖：
@@ -160,9 +171,10 @@ pnr/build_runtime_quantizer_q28.tcl
 - `runtime_activation_quantizer_ctrl.v` 从 DDR3 解包 Q6.10 或 Q28 源向量，驱动相应 activation quantizer，并把 32 个 INT8 打包为一个 256-bit beat 写入 `linear_activation_int8`；
 - `runtime_scale_builder_ctrl.v` 连续读取原始 FP16 weight scale，按每行 14→16 或 76→80 插入 padding，把 UQ4.28 写入对应 combined-scale 区；
 - `runtime_quantizer_ctrl.v` 顺序调度 activation 和 scale 两段，记录饱和计数及失败阶段；`runtime_quantizer_q28_top.v` 固化 Q28 参数分支用于独立综合；
-- Q6.10/Q28 controller 均已重新通过 PDS Compile/Synthesize，无硬错误，但未做独立 PnR、多角时序或板卡验证。
+- `runtime_quantizer_trace_checker.v` 与验证顶层已经对七个真实矩阵逐命令检查 AXI 地址、burst、命令数和 beat 数，并回读全部逐位结果；
+- 量化子系统已经完成独立 PnR、多角时序、位流、JTAG SRAM、七矩阵固定真实输入和 Q6.10/Q28 随机/边界板卡验证。
 
-当前唯一实施点是建立量化 RTL/DDR3 自动数值闭环：使用固定真实 QKV、O_proj、gate/up、down 输入逐项比较全部 INT8、max metadata、combined scale、padding word、burst 长度和目标地址。该闭环及独立 PnR/Timing/JTAG SRAM 通过后，才连接 `transformer_block_ctrl.v`、`transformer_block_top.v` 和完整 host/PDS 工程。
+当前唯一实施点已经切换为完整 Block：连接统一 DDR3 仲裁、`transformer_block_ctrl.v`、`transformer_block_top.v` 和完整 host/PDS 工程，把 22 个阶段从同一组 hidden state 连贯执行到第二处残差，并逐位比较全部关键中间张量和最终 `[896]` 输出。
 
 ## 7. 完整 G2 验收标准
 
@@ -176,3 +188,60 @@ pnr/build_runtime_quantizer_q28.tcl
 6. 仅通过 JTAG 下载到 FPGA 易失性 SRAM，不擦写 Flash。
 7. 完整 Block 固定用例与随机/边界真实板卡逐位通过。
 8. G2 全部通过前，不进入 28 层调度、LM Head 或文本生成。
+
+
+## 8. 运行时量化验收复现
+
+构建：
+
+```bat
+cd /d E:\50K\AI_LLM_FPGA\pangu_ai_accel\transformer_block_g2\pnr
+D:\Pango\PDS_2022.2-SP6.4\bin\pds_shell.exe ^
+  -file build_runtime_quantizer_validation.tcl ^
+  -project_name runtime_quantizer_validation_seed5_11
+```
+
+时序验收必须看到：
+
+```text
+Design Summary : All Constraints Met.
+Slow ddrphy_clkin setup WNS = +0.187 ns, TNS = 0
+Slow ddrphy_clkin hold  WHS = +0.171 ns, THS = 0
+Fast ddrphy_clkin setup WNS = +2.908 ns, TNS = 0
+Fast ddrphy_clkin hold  WHS = +0.101 ns, THS = 0
+```
+
+仅下载 SRAM：
+
+```bat
+D:\Pango\PDS_2022.2-SP6.4\bin\cdt_cfg_shell.exe ^
+  -file program_runtime_quantizer_validation_sram.tcl ^
+  -work_dir .
+```
+
+该脚本只包含 `cfg_connect/cfg_scan_chain/cfg_assign_file/cfg_program`，不包含 Flash 擦除或编程命令。验收记录为下载 100%、DONE bit=1。
+
+软件与板卡命令：
+
+```bat
+python -m unittest discover -s model_tools -p "test_*.py"
+python -m model_tools.runtime_quantizer_validation verify
+python -m model_tools.runtime_quantizer_validation stress --rounds 1000 --seed 20260819
+python tools\pangu_runtime_quantizer_host.py --port COM20 info
+python tools\pangu_runtime_quantizer_host.py --port COM20 status
+python tools\pangu_runtime_quantizer_host.py --port COM20 --timeout 300 all
+python tools\pangu_runtime_quantizer_host.py --port COM20 --timeout 300 stress k_proj --rounds 100 --seed 20260819
+python tools\pangu_runtime_quantizer_host.py --port COM20 --timeout 300 stress o_proj --rounds 24 --seed 20260819
+```
+
+最终结果：
+
+- 软件回归 `165/165 PASS`；
+- 七矩阵软件固定清单 `7/7 PASS`；
+- 软件事务压力 `1000/1000 PASS`；
+- 七矩阵真实板卡 `7/7 PASS`；
+- Q6.10 板级压力 `100/100 PASS`；
+- Q28 板级压力 `24/24 PASS`；
+- 固件 `PANGU50K G2 QUANT V1`；
+- 最终状态 `ddr_init_done=1、core_busy=0、trace_error=0、protocol_error=0`；
+- 位流 `generate_bitstream/runtime_quantizer_validation_top.sbit`，SHA256=`220b771afbf8ea8d99806f3de27512748e2bd54913b1cc5e1f4a894647314236`。

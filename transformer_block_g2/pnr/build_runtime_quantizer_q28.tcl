@@ -4,6 +4,7 @@
 add_design "../rtl/unsigned_divider_rne.v"
 add_design "../rtl/runtime_q10_activation_quantizer.v"
 add_design "../rtl/q28_to_binary32.v"
+add_design "../rtl/q28_to_binary32_sequential.v"
 add_design "../rtl/runtime_q28_activation_quantizer.v"
 add_design "../rtl/runtime_fp16_scale_builder.v"
 add_design "../rtl/runtime_activation_quantizer_ctrl.v"

@@ -1852,7 +1852,7 @@ transformer_block_g2/rtl/transformer_block_scheduler.v
 7. 完整顶层仍需独立 PDS、多角时序、JTAG SRAM 和真实 hidden/random/boundary 逐位压力，在此之前不得进入阶段 H。
 
 
-## 四十、G2.3 运行时量化 RTL 与 DDR3 controller 骨架（2026-07-25）
+## 四十、G2.3 运行时量化 RTL 与 DDR3 controller 骨架（后续已由第四十一节更新）
 
 本轮继续完成 G2 收尾，把第三十九节中尚未存在的运行时量化数据路落实为可综合 RTL，并重新以最新源码执行软件回归和 PDS Compile/Synthesize。当前仍未宣称完整 Transformer Block、量化数值闭环、PnR、位流或真实板卡已经通过。
 
@@ -1923,15 +1923,170 @@ transformer_block_g2/rtl/runtime_quantizer_q28_top.v
 - G2 完整软件链确定性压力：`1/1 PASS`，seed=`20260818`；
 - `git diff --check`：PASS。
 
-### 5. 当前真实边界与唯一下一任务
+### 5. 当时的真实边界与下一任务（后续已完成）
 
-运行时量化 RTL 和 DDR3 controller 已经存在，但目前尚无 RTL 仿真或真实 FPGA 证据证明其输出与软件参考逐位一致，也尚未完成独立 PnR/多角时序、位流和 JTAG SRAM。因此 G2 复选框仍不得勾选，不能宣称完整 Block 已完成。
+本小节记录 G2.3 骨架完成时的历史边界。当时运行时量化 RTL 和 DDR3 controller 尚无真实 FPGA 逐位证据，也未完成独立 PnR/多角时序、位流和 JTAG SRAM；这些事项现已由第四十一节完成。完整 Block 仍未完成。
 
-当前唯一下一任务：
+当时的下一任务：
 
 1. 为 Q6.10/Q28 量化 DDR3 controller 建立自动数值闭环；
 2. 使用真实 QKV、O_proj、gate/up、down 输入逐项比较全部 INT8、max metadata 和 UQ4.28；
 3. 检查 14→16、76→80 padding、burst 分段、读写长度和目标地址；
 4. 完成量化子系统独立 PDS Map/PnR/多角 Timing/Bitstream 和 JTAG SRAM 板卡压力；
 5. 通过后再连接完整 `transformer_block_ctrl.v`、`transformer_block_top.v`、DDR3 仲裁和 host 工具；
+6. 完整 Block 单独通过前不得进入 28 层调度、LM Head 或文本生成。
+
+
+## 四十一、G2.4 运行时量化自动逐位板级闭环完成（2026-07-25）
+
+本轮完成 `PROJECT_ROADMAP.md` 中此前唯一的下一任务：为 Q6.10/Q28 运行时量化 DDR3 controller 建立自动逐位闭环，并完成独立 PDS、多角时序、JTAG SRAM 和真实板卡验收。该结论只适用于运行时量化子系统；完整 layer0 Transformer Block 的 22 阶段连贯硬件闭环尚未完成。
+
+### 1. 自动软件金标准与七矩阵清单
+
+新增：
+
+```text
+model_tools/runtime_quantizer_validation.py
+model_tools/runtime_quantizer_g2_reference.json
+model_tools/test_runtime_quantizer_validation.py
+tools/pangu_runtime_quantizer_host.py
+```
+
+固定清单覆盖 layer0 七个真实 Linear 调用：
+
+```text
+q_proj / k_proj / v_proj / o_proj / gate_proj / up_proj / down_proj
+```
+
+每个事务均冻结并自动核对：
+
+- 实际 G2 source、raw FP16 scale、INT8 activation 和 combined-scale DDR3 地址；
+- Q6.10 或 Q28 源向量、原始 FP16 weight scale；
+- 全部 symmetric INT8 activation；
+- max-abs metadata：Q10 max、binary32 mantissa/exponent/bits、all-zero；
+- 每行 14→16 或 76→80 的 padded UQ4.28 combined scale；
+- source/raw-scale 读取和 activation/combined-scale 写入的命令数、beat 数、burst 长度与首尾地址；
+- 配置、上传和结果载荷的长度与 SHA256。
+
+最终软件验收：
+
+- 完整 `model_tools` 回归：`165/165 PASS`；
+- 运行时量化七矩阵固定清单：`7/7 PASS`；
+- 地址、burst、padding 和载荷事务压力：`1000/1000 PASS`，seed=`20260819`；
+- Python `py_compile` 与 `git diff --check`：PASS。
+
+随机压力金标准明确以精确整数/二进制有理数规格为权威。测试发现旧 NumPy 浮点复刻在数学半整数边界会出现 `63.5 -> 63.49999999999999`，从而错误舍入为 63；精确 Q10 RNE 对 `source=2047、max=4094` 应为 ties-to-even 64。固定真实矩阵仍保留与既有 NumPy/G1/F6 定义逐位一致的断言，随机/边界压力则直接对照 RTL 的精确规格。
+
+### 2. 验证 RTL、协议与时序收敛
+
+新增：
+
+```text
+transformer_block_g2/rtl/q28_to_binary32_sequential.v
+transformer_block_g2/rtl/runtime_quantizer_trace_checker.v
+transformer_block_g2/rtl/runtime_quantizer_validation_ctrl.v
+transformer_block_g2/rtl/runtime_quantizer_validation_top.v
+transformer_block_g2/pnr/build_runtime_quantizer_validation_ctrl.tcl
+transformer_block_g2/pnr/build_runtime_quantizer_validation.tcl
+transformer_block_g2/pnr/program_runtime_quantizer_validation_sram.tcl
+```
+
+验证顶层通过 UART `I/S/C/L/G` 协议完成配置、DDR3 上传、量化执行和结果回读；同一位流同时覆盖 Q6.10 与 Q28。结果包含 96 B metadata header、全部 INT8 和全部 padded UQ4.28。AXI trace checker 在硬件运行时逐命令检查地址、burst、命令数和 beat 数，错误为粘滞状态并通过状态字和结果头返回。
+
+为满足 100 MHz，先后完成以下不改变逐位结果的多周期重构：
+
+- Q28 int64→binary64→binary32 双重 RNE 改为顺序 MSB 搜索、逐拍规格化和两级 RNE；
+- Q28 加载改为输入捕获拍与 max-abs 更新拍；
+- 96 位 restoring divider 每一位拆为比较拍和更新拍，最终 ties-to-even 再拆为比较与加一两拍；
+- FP16 scale builder 将 FP16 解码/35 位乘积、指数准备、96 位移位和除法拆为多周期；
+- trace checker 完成信号由外层状态机明确等待，避免跨拍误判。
+
+### 3. PDS、资源、时序和位流
+
+最终验收使用 PDS 2022.2-SP6.4、PGL50H-6IFBG484，PnR seeds=`5/11`：
+
+- Compile：PASS；
+- Synthesize：PASS；
+- Device Map：PASS；
+- Place & Route：PASS；
+- 详细布线：79 轮后未布线网络为 0；
+- hold 修复：4 轮；
+- Timing：`Design Summary : All Constraints Met`；
+- Bitstream：PASS。
+
+资源：
+
+| 资源 | 使用量 |
+|---|---:|
+| LUT | 16370 / 42800（38.25%） |
+| FF | 13887 / 64200（21.63%） |
+| DRM18K | 40 / 134（29.85%） |
+| APM | 8 / 84（9.52%） |
+| I/O | 79 / 296（26.69%） |
+
+多角时序：
+
+| Corner | Clock | Setup WNS/TNS | Hold WHS/THS |
+|---|---|---|---|
+| Slow | `ref_clk` | `+14.559 ns / 0` | `+0.256 ns / 0` |
+| Slow | `ddrphy_clkin` | `+0.187 ns / 0` | `+0.171 ns / 0` |
+| Fast | `ref_clk` | `+16.067 ns / 0` | `+0.199 ns / 0` |
+| Fast | `ddrphy_clkin` | `+2.908 ns / 0` | `+0.101 ns / 0` |
+
+验收位流：
+
+```text
+transformer_block_g2/pnr/generate_bitstream/runtime_quantizer_validation_top.sbit
+size   = 2101696 B
+SHA256 = 220b771afbf8ea8d99806f3de27512748e2bd54913b1cc5e1f4a894647314236
+```
+
+### 4. JTAG SRAM 与真实板卡结果
+
+使用 `cdt_cfg_shell.exe` 仅下载 FPGA 易失性 SRAM：
+
+- USB Cable II 扫描到 PGL50H；
+- 下载进度 100%；
+- DONE bit=1；
+- 未执行任何 Flash 擦除或编程命令。
+
+固件与状态：
+
+```text
+INFO   = PANGU50K G2 QUANT V1
+DDR3   = initialized
+trace_error    = 0
+protocol_error = 0
+```
+
+七个真实矩阵固定结果全部逐位通过：
+
+| Matrix | Source | Result SHA256 |
+|---|---|---|
+| q_proj | Q6.10 | `54429490cc7504705bf30c37d5cda345e9c934d630663ecca0eb30d71a3f3e30` |
+| k_proj | Q6.10 | `7070a0522562dc56740418c66a74ee2fd1937f784d49be9c7b486287847e5c16` |
+| v_proj | Q6.10 | `59b18e3244da7f59f2fead479d2f2f86de363e42e097b50763f84c81691fcbe4` |
+| o_proj | Q28 | `c74acb088a82291876a4d68e187d9a64c05175d77677e778d3b3469483a70aaf` |
+| gate_proj | Q6.10 | `e7df51ddaae8cf74c173cde982803e61b0684343b23b3147f84be4e3b5ffb3e5` |
+| up_proj | Q6.10 | `a430dffb6d2e44594d4c21701bf3ef3fcd95d6053762911d4ae6cb5eb551663d` |
+| down_proj | Q28 | `27bf301cdfbd465fa08fac623b157ce95b528acf6fee8e3d665ed2c1ebbc6f88` |
+
+固定真实矩阵：`7/7 PASS`，总耗时约 137.448 秒。每项均比较 metadata、全部 INT8、全部 UQ4.28、padding 和 AXI trace，而非只比较最终摘要。
+
+真实 FPGA 随机/边界压力：
+
+- Q6.10 `k_proj`：`100/100 PASS`，seed=`20260819`，约 134.651 秒；
+- Q28 `o_proj`：`24/24 PASS`，seed=`20260819`，约 191.596 秒；
+- 覆盖全零、signed 极值、完整随机、稀疏、幂次边界、中等动态范围和精确 half-way tie；
+- 最终状态 `core_busy=0、trace_error=0、protocol_error=0`。
+
+### 5. 当前唯一下一任务
+
+运行时量化子系统已经独立完成软件、PDS、时序、位流和真实板卡验收。下一步只允许继续完整 layer0 Transformer Block 集成：
+
+1. 建立统一 DDR3 仲裁；
+2. 连接 `transformer_block_ctrl.v`、`transformer_block_top.v` 与 22 阶段 scheduler；
+3. 从同一组 block hidden state 连贯执行到第二处残差；
+4. 对全部关键中间张量和最终 `[896]` 输出逐位比较；
+5. 完成完整 Block 的独立 PnR、多角时序、JTAG SRAM、固定真实 hidden 和随机/边界板级压力；
 6. 完整 Block 单独通过前不得进入 28 层调度、LM Head 或文本生成。

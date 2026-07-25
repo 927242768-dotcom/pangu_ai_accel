@@ -30,7 +30,7 @@
 24. [`mlp_silu_up_mul_g1/README.md`](mlp_silu_up_mul_g1/README.md)：已验证的完整 signed 80-bit Q38 乘积、RNE、int64 饱和和 `[4864]` `SiLU(gate) × up` 闭环。
 25. [`mlp_down_proj_g1/README.md`](mlp_down_proj_g1/README.md)：已验证的真实 layer0 `down_proj=[896,4864]`、76-group INT4/UQ4.28 和完整 `[896]` Q28 闭环。
 26. [`mlp_residual_g1/README.md`](mlp_residual_g1/README.md)：已验证的正确 residual 支路、down Q28→Q6.10 RNE、两级饱和和完整 layer0 MLP 闭环。
-27. [`transformer_block_g2/README.md`](transformer_block_g2/README.md)：正在进行的 G2 完整 layer0 Transformer Block 集成；当前已完成软件全链、精确运行时量化规格、固定地址/矩阵/25 状态契约、共享 Linear、DDR3 行控制器、22 阶段 scheduler，以及 Q6.10/Q28 运行时量化 DDR3 controller 的 PDS Compile/Synthesize；完整数值闭环、顶层/PnR/位流/真实板卡尚未完成。
+27. [`transformer_block_g2/README.md`](transformer_block_g2/README.md)：正在进行的 G2 完整 layer0 Transformer Block 集成；软件全链、固定地址/矩阵/25 状态契约、共享 Linear、22 阶段 scheduler，以及 Q6.10/Q28 运行时量化 DDR3 子系统均已建立。量化子系统已完成七矩阵自动逐位、独立 PnR/多角时序、位流、JTAG SRAM 和真实板卡压力；完整 Block 的统一 DDR3 仲裁/controller/top 与连贯板级闭环尚未完成。
 
 ## 当前状态
 
@@ -94,16 +94,16 @@ G1 MLP `down_proj` 现已完成。独立工程 `mlp_down_proj_g1` 直接消费�
 
 G1 MLP 第二处残差与完整 MLP 现已完成。独立工程 `mlp_residual_g1` 严格使用完整 Attention 第一处残差后的 `[896]` signed Q6.10 hidden，而不是 `post_attention_layernorm` 输出；down 分支使用已验证 `[896]` signed int64 Q28。硬件执行 signed RNE `>>18`、第一次 int16 饱和、残差相加和第二次 int16 饱和。四组连贯真实固定输入全部 `896/896` 上板逐位一致；新增测试 `5/5 PASS`，完整软件回归 `142/142 PASS`，软件随机/边界 `1000/1000 PASS`，同一 seed 连续真实 FPGA index=`0..299` 累计 `300/300 PASS`。PDS `All Constraints Met`，慢角 setup WNS=`+0.727 ns`、hold WHS=`+0.169 ns`，快角 setup WNS=`+3.298 ns`、hold WHS=`+0.100 ns`，TNS/THS 全 0；验收位流 SHA256=`ddc424fae630fda5ab55acc8d2cb12d80b3f8cca1d5341f4a455ec0aa0a0e42b`。
 
-G2 软件集成基线与运行时量化硬件骨架已经建立。`model_tools/transformer_block_reference.py` 从同一组 block hidden state 连贯执行完整 layer0 Block，四组 query/count=`0/1、1/2、5/6、15/16` 的最终 SHA256 与 G1 第二处残差结果完全一致。`runtime_linear_quant_reference.py` 把 Q6.10/Q28→binary32→INT8 与 FP16 scale→UQ4.28 改写为精确整数规格，并在七个真实矩阵上逐位复现原定义；最新完整 `model_tools` 回归 `157/157 PASS`，固定清单 `4/4 PASS`，完整软件链压力 `1/1 PASS`。当前契约包含 28 个 scratch/查表区域、24 个参数/scale 区、七个矩阵调用和 25 个状态 ID；共享 Linear、运行时 DDR3 Linear controller、22 阶段 scheduler，以及 Q6.10/Q28 激活量化、FP16 scale 构建、INT8/combined-scale DDR3 读写 controller 均已通过 PDS Compile/Synthesize。Q10 controller 资源为 `3494 LUT/2773 FF/8 DRM/2 APM`，Q28 controller 为 `6500 LUT/3301 FF/32 DRM/2 APM`。这些结果仍只是独立综合；尚未完成量化 RTL 数值逐位闭环、完整顶层、PnR/多角时序、位流和真实板卡，因此不能把 G2 标记为通过。
+G2 软件集成基线与运行时量化子系统已经完成独立验收。`model_tools/transformer_block_reference.py` 从同一组 block hidden state 连贯执行完整 layer0 Block，四组 query/count=`0/1、1/2、5/6、15/16` 的最终 SHA256 与 G1 第二处残差结果完全一致。当前契约包含 28 个 scratch/查表区域、24 个参数/scale 区、七个矩阵调用和 25 个状态 ID；共享 Linear、运行时 DDR3 Linear controller 和 22 阶段 scheduler 均已建立。量化验证工程对 q/k/v/o/gate/up/down 七个真实矩阵自动核对全部 INT8、max metadata、UQ4.28、14→16/76→80 padding 和 AXI 地址/burst，真实板卡 `7/7 PASS`；Q6.10 随机/边界 `100/100 PASS`，Q28 随机/边界 `24/24 PASS`。最新完整 `model_tools` 回归 `165/165 PASS`，量化事务软件压力 `1000/1000 PASS`。PDS `All Constraints Met`，慢角用户时钟 setup WNS=`+0.187 ns`、hold WHS=`+0.171 ns`，TNS/THS 全 0；位流 SHA256=`220b771afbf8ea8d99806f3de27512748e2bd54913b1cc5e1f4a894647314236`，JTAG SRAM DONE bit=1。完整 Block 的统一 DDR3 仲裁、controller/top 和连贯板级闭环仍未完成。
 
 ## 当前唯一下一任务
 
 ```text
-继续建立独立的完整 layer0 Transformer Block 集成闭环。当前先为 Q6.10/Q28 运行时量化
-DDR3 controller 建立自动逐位数值闭环，验证全部 INT8、max metadata、UQ4.28 scale、
-14→16/76→80 padding 和读写长度；随后完成量化子系统独立 PnR/多角时序/JTAG SRAM，
-再把 22 个计算阶段接入完整 DDR3 仲裁与 Transformer Block 顶层。完整 Block 通过前不得
-进入 28 层全模型调度、LM Head 或文本生成。
+继续建立独立的完整 layer0 Transformer Block 集成闭环。运行时量化子系统已经完成自动
+逐位、独立 PnR/多角时序、JTAG SRAM 和真实板卡验收；现在把 22 个计算阶段接入统一 DDR3
+仲裁、`transformer_block_ctrl.v`、`transformer_block_top.v` 和完整 host/PDS 工程，从同一组
+block hidden state 连贯执行到第二处残差，并逐位比较全部关键中间张量和最终 `[896]` 输出。
+完整 Block 通过前不得进入 28 层全模型调度、LM Head 或文本生成。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。
