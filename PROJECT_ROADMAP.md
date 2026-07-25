@@ -608,7 +608,7 @@ F6 第三段残差与完整 Attention 子层验证证据（2026-07-24）：
 - [x] up projection
 - [x] SiLU(gate)
 - [x] SiLU(gate) × up
-- [ ] down projection
+- [x] down projection
 - [ ] 残差连接
 - [ ] 完整 MLP 与软件参考比较
 
@@ -660,6 +660,19 @@ G1 `SiLU(gate) × up` 真实逐元素乘法验证证据（2026-07-25）：
 - 验收位流：`mlp_silu_up_mul_g1/pnr_seed17/generate_bitstream/mlp_silu_up_mul_top.sbit`，大小 2101696 B，SHA256=`a83797a8b2ec75d030fc01144e6bf51e7de0ec930fc135c1a0aba89ebf1c4336`；
 - JTAG SRAM 下载成功，`done bit=1`，未操作 Flash；固件 `PANGU50K MLP SILUUP V1`，DDR3 初始化成功；四组固定输入耗时 30.55 秒；同一固定 seed 连续真实 FPGA 随机/边界 100/100 PASS，所有 4864 项均与 Python 任意精度金标准逐位一致；
 - `SiLU(gate) × up` 已完整通过，当前唯一允许进入的下一任务为独立 `down_proj`，不得提前合并 MLP 残差或完整 Transformer Block。
+
+G1 `down_proj` 真实完整投影验证证据（2026-07-25）：
+
+- 新增独立 `mlp_down_proj_g1` 工程，输入直接复用已经真实上板逐位通过的 `SiLU(gate) × up` `[4864]` signed int64 Q28；真实 `model.layers.0.mlp.down_proj.weight` shape=`[896,4864]`、group size 64、每行 76 groups 的对称 signed INT4，`.p50` 不存在 bias；本阶段没有执行第二处残差；
+- 数值规则冻结为 Q28→float32、逐向量对称 INT8 `[-127,127]` RNE、zero point=0，combined scale 使用 unsigned UQ4.28 RNE 与显式饱和；每 64 项执行 signed INT32 点积，76 组乘 scale 后在 signed int64 Q28 中精确累加；理论最坏绝对累加 `18571850900440320 < 2^63-1`，禁止隐含截断或回绕；
+- 四组 query/count=`0/1、1/2、5/6、15/16` 的完整 `[896]` 输出均真实上板 `896/896` 逐位一致；输出 SHA256 分别为 `20ada87fb91b6f3a286d554eed7ede0d369e417162683bb4828f4ba2d0a45da3`、`05daecd0467d77bd1cf4f48be22caaece068cd844d263b46f88e016775deacec`、`2e8933ddb0423cf7f7c43d7165f82ce62c128607b883f80ca942d919740a0ccf`、`2dcea63a160554e624edd6f1c42e28a15f17a59e4999badfabdc8a7db80a82ee`；
+- 新增单元测试 7/7 PASS，完整 `model_tools` 回归 137/137 PASS；固定清单、2499328 B 上传载荷往返和软件随机/边界压力 1000/1000 PASS，seed=`20260816`，覆盖全零、上游乘法极值/饱和、RNE tie、稀疏、一般范围和完整 int64 bit pattern；
+- RTL 缓存 152 拍激活和当前行 76 拍权重，激活与权重均按 AXI 最大 16 拍自动分段；每行 76 个 scale 补齐为 10 拍，每 4 行结果组成 1 拍立即写回；
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功，详细布线 153 轮后未布线网络为 0，hold 修复 6 轮完成；资源为 8915 LUT、9426 FF、70 distributed RAM、8 DRM、12 APM、79 IO；
+- 多角时序 `All Constraints Met`：慢角 core setup WNS=`+0.872 ns`、TNS=0，hold WHS=`+0.110 ns`、THS=0；快角 setup WNS=`+3.026 ns`、TNS=0，hold WHS=`+0.015 ns`、THS=0；恢复、移除和最小脉宽无违例；
+- 验收位流：`mlp_down_proj_g1/pnr/generate_bitstream/mlp_down_proj_top.sbit`，大小 2101696 B，SHA256=`f4d1013a287fc27003db88905f3c61e25620d213475039ddbb14900580c46757`；
+- JTAG SRAM 下载 100%，`done bit=1`，未操作 Flash；固件 `PANGU50K MLP DOWN V1`，DDR3 初始化成功；四组固定每组上传约 216.78~216.82 秒，计算与回读约 0.65 秒；真实 FPGA 随机/边界 3/3 PASS，seed=`20260816`，覆盖全零、极值/饱和和正负 RNE half-way tie，所有 896 项逐位一致；
+- `down_proj` 已独立完整通过，当前唯一允许进入的下一任务为第二处残差；残差单独通过前不得宣称完整 MLP 或完整 Transformer Block 完成。
 
 ### G2 单个 Transformer Block
 
@@ -902,6 +915,15 @@ G1 `SiLU(gate) × up` 真实逐元素乘法验证证据（2026-07-25）：
 | `mlp_silu_up_mul_g1/pnr_seed17/program_sram.tcl` | G1 验收位流仅下载 FPGA 易失性 SRAM 的脚本 |
 | `mlp_silu_up_mul_g1/README.md` | G1 乘法数值规则、协议、地址、时序、位流和真实上板证据 |
 | `tools/pangu_mlp_silu_up_mul_host.py` | G1 软件自检、四组真实固定和连续随机序列上板逐位比较工具 |
+| `model_tools/mlp_down_proj_reference.py` | G1 verified Q28 输入量化、真实 down_proj 权重、76 组 Q28 累加与载荷金标准 |
+| `model_tools/mlp_down_proj_g1_reference.json` | G1 四组真实 down_proj 完整输出、载荷和边界 SHA256 清单 |
+| `model_tools/test_mlp_down_proj_reference.py` | G1 shape、Q28 转换、scale 饱和、INT64 安全、载荷与真实来源测试 |
+| `mlp_down_proj_g1/rtl/mlp_down_proj_core.v` | G1 K=4864、76 groups、MAC16 与 signed int64 Q28 累加核心 |
+| `mlp_down_proj_g1/rtl/mlp_down_proj_ctrl.v` | G1 UART、2.499 MB DDR3 上传、长 burst 分段、896 行调度和结果回读控制器 |
+| `mlp_down_proj_g1/pnr/build_mlp_down_proj.tcl` | G1 down_proj 独立 PDS 全流程构建脚本 |
+| `mlp_down_proj_g1/pnr/program_sram.tcl` | G1 down_proj 位流仅下载 FPGA 易失性 SRAM 的脚本 |
+| `mlp_down_proj_g1/README.md` | G1 数值定义、载荷、地址、时序、位流和真实上板证据 |
+| `tools/pangu_mlp_down_proj_host.py` | G1 软件自检、四组真实固定和随机/边界上板逐位比较工具 |
 | `model_tools/README.md` | `.p50` 格式、真实张量布局、量化定点定义、工具用法和验证证据 |
 
 # 8. 后续每次工作的收尾要求
@@ -919,10 +941,11 @@ G1 `SiLU(gate) × up` 真实逐元素乘法验证证据（2026-07-25）：
 ## 当前唯一下一任务（简明版）
 
 ```text
-G1 MLP 的唯一下一任务：独立完成 layer0 `down_proj`。输入必须直接来自已经真实上板逐位
-通过的 `SiLU(gate) × up` `[4864]` signed int64 Q28；读取真实
-`model.layers.0.mlp.down_proj.weight` `[896,4864]` groupwise signed INT4 参数，先冻结 Q28 到
-逐向量 INT8 激活量化、UQ4.28 combined scale、分组累加、输出 Q28/bias 和饱和规则，再建立
-四组连贯真实输入、随机/边界软件参考、独立硬件流式调度、PDS 全流程、多角时序、JTAG SRAM
-和逐位上板压力。`down_proj` 单独全部通过前不得进入 MLP 残差或完整 MLP。
+G1 MLP 的唯一下一任务：独立完成第二处残差。输入一侧必须使用已经真实上板逐位通过的
+`down_proj` `[896]` signed int64 Q28，另一侧必须使用进入 `post_attention_layernorm` 之前、
+也就是完整 Attention 第一处残差后的 `[896]` signed Q6.10 hidden state。先冻结 down_proj
+Q28→Q6.10 的 signed RNE 右移 18 位与显式饱和，再执行 signed Q6.10 残差相加和第二次
+显式饱和；建立四组连贯真实输入、随机/边界软件参考、独立 RTL/PDS、多角时序、JTAG SRAM
+和逐位上板压力。第二处残差单独全部通过前不得勾选“完整 MLP 与软件参考比较”，也不得进入
+完整 Transformer Block。
 ```

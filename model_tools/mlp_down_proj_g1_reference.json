@@ -1,0 +1,130 @@
+{
+  "format_version": 1,
+  "operator": "qwen2_layer0_mlp_down_projection",
+  "definition": {
+    "input_source": "verified layer0 SiLU(gate) times up output",
+    "input_format": "signed int64 Q28 [4864]",
+    "activation_quantization": "Q28 to float32, symmetric per-vector INT8 [-127,127], RNE, zero_point=0",
+    "weight_tensor": "model.layers.0.mlp.down_proj.weight",
+    "weight_shape": [896, 4864],
+    "weight_storage": "signed INT4 groupwise symmetric",
+    "group_size": 64,
+    "groups_per_row": 76,
+    "combined_scale": "unsigned UQ4.28 with RNE and saturation",
+    "bias": "absent; padded bias_q28 all zero",
+    "output_format": "signed int64 Q28 [896]",
+    "scale_row_bytes": 320,
+    "upload_bytes": 2499328,
+    "result_bytes": 7168,
+    "max_group_acc": 56896,
+    "max_output_magnitude_full_uq4_28": 18571850900440320,
+    "int64_safe": true,
+    "forbidden_next_operation": "MLP residual is not part of this stage"
+  },
+  "cases": [
+    {
+      "label": "layer0 MLP down_proj query=0, count=1",
+      "query_position": 0,
+      "count": 1,
+      "activation_scale": 0.009109736427547425,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_activation_quantization_error": 0.012174192626801722,
+      "max_fixed_scale_error": 9.639619228563046e-06,
+      "max_fixed_error_bound": 3.133900463581085e-05,
+      "range": {"source_q28_min": -195091794, "source_q28_max": 310562775, "output_q28_min": -105978992, "output_q28_max": 111407943},
+      "sha256": {
+        "source_q28": "278ceccc804b8f74266b6000745c1ae21d09cf47ba19041ff13cb5cbdaeac0ca",
+        "activation_int8": "c8985f13b0c5e3cd9570c4ed53fcedf154406f95b99efba9bd24bf5fbbc47279",
+        "packed_weight_int4": "db626c292a3b0fbf618c4d64b3a0a858e73e930f5b7beb8804319284f49de577",
+        "combined_scale_uq4_28": "b161ab4a4f567a6610987ef89f1526e198ddd44ae9ae4a219163eb5605892f86",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "20ada87fb91b6f3a286d554eed7ede0d369e417162683bb4828f4ba2d0a45da3",
+        "upload_payload": "a934ca8a582b049ba2cc0087fa486b97a9651bffc4626cad3a07f12ea872c1f1"
+      },
+      "preview": {
+        "activation_first16_int8": [1, 0, -3, 1, -23, -2, -2, -5, 7, 4, 11, 20, -4, 4, 1, 1],
+        "output_first8_q28": [-52450259, -2906548, -2814512, -33134401, -49943582, -5725367, -47286725, -20997832],
+        "output_last8_q28": [-37593253, 19319074, -30268532, 24592027, -16098418, -18497043, 18015042, 12993225]
+      }
+    },
+    {
+      "label": "layer0 MLP down_proj query=1, count=2",
+      "query_position": 1,
+      "count": 2,
+      "activation_scale": 0.018873220353614627,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_activation_quantization_error": 0.029286234161879587,
+      "max_fixed_scale_error": 3.7815061230198066e-06,
+      "max_fixed_error_bound": 1.7384067177772522e-05,
+      "range": {"source_q28_min": -643412649, "source_q28_max": 237312094, "output_q28_min": -136670147, "output_q28_max": 129518677},
+      "sha256": {
+        "source_q28": "96e1191832febbb2bf246918e489725094567811869ab85bf8452ee8e6520fa9",
+        "activation_int8": "088adce00bdf9783144126f8c0eab7021f8406c175f7e14dfe2a70d7f2e228b3",
+        "packed_weight_int4": "db626c292a3b0fbf618c4d64b3a0a858e73e930f5b7beb8804319284f49de577",
+        "combined_scale_uq4_28": "0091e0204cff19c6c6c1c2b9aba655f654f32a9d7d7e95943548b990a2bd541a",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "05daecd0467d77bd1cf4f48be22caaece068cd844d263b46f88e016775deacec",
+        "upload_payload": "c5d62e998b6c9a63bd1c6b2a761acf002459d201b6d6843ecb468de1bb8628a4"
+      },
+      "preview": {
+        "activation_first16_int8": [3, 4, -7, 0, 1, -2, 0, -4, -2, -6, 5, 1, -3, 20, 1, 0],
+        "output_first8_q28": [-34297893, 6038927, -16367230, 39449920, 47899581, -68226486, 30732471, 30297303],
+        "output_last8_q28": [6458016, -35572441, 58785159, 80182618, 24286172, -27648023, -7498540, 13639555]
+      }
+    },
+    {
+      "label": "layer0 MLP down_proj query=5, count=6",
+      "query_position": 5,
+      "count": 6,
+      "activation_scale": 0.021344849443811133,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_activation_quantization_error": 0.027956525516131814,
+      "max_fixed_scale_error": 3.2069039275217648e-06,
+      "max_fixed_error_bound": 1.6080215573310852e-05,
+      "range": {"source_q28_min": -727673706, "source_q28_max": 459810348, "output_q28_min": -134181466, "output_q28_max": 366860667},
+      "sha256": {
+        "source_q28": "9f01a9589fc9ee4f8b33acd9a64b8a767b37bee8f788697f0043ac395c7a28dc",
+        "activation_int8": "5140b6e3a38d637591d9bb01371703debbba1933017e48e1afd0ff11e542c0f0",
+        "packed_weight_int4": "db626c292a3b0fbf618c4d64b3a0a858e73e930f5b7beb8804319284f49de577",
+        "combined_scale_uq4_28": "48955a773b30bc9c4c79f75d352b76c715d6019b43aaf482f16412c9cdf51f63",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "2e8933ddb0423cf7f7c43d7165f82ce62c128607b883f80ca942d919740a0ccf",
+        "upload_payload": "383214f04fdce0578b8718b89b6e05b7f6399a9acbb5bfb27c0c6f26166ae5cc"
+      },
+      "preview": {
+        "activation_first16_int8": [0, 0, -2, 0, 0, 9, 0, 3, -2, 20, 0, -2, 1, -13, 1, -2],
+        "output_first8_q28": [1732926, -53001699, -8482623, -4875148, -28082902, -21045684, 8824166, 93866536],
+        "output_last8_q28": [-27749863, 36349439, 37940925, -43057793, -71095906, 8237037, -14028616, -19836530]
+      }
+    },
+    {
+      "label": "layer0 MLP down_proj query=15, count=16",
+      "query_position": 15,
+      "count": 16,
+      "activation_scale": 0.009072097267691545,
+      "activation_clipped_count": 0,
+      "combined_scale_saturated_count": 0,
+      "max_activation_quantization_error": 0.012904055743092058,
+      "max_fixed_scale_error": 8.940995001927021e-06,
+      "max_fixed_error_bound": 3.445334732532501e-05,
+      "range": {"source_q28_min": -309279632, "source_q28_max": 272226531, "output_q28_min": -175208055, "output_q28_max": 111607679},
+      "sha256": {
+        "source_q28": "297b982da2fb3ee7bd9202cd8d655dec200a9e19fee9a8c614e2e5412ae97802",
+        "activation_int8": "3c4c45e43cf03a45535921c34170330dfb241a629bf6b2b9f7e4911b0ba6a867",
+        "packed_weight_int4": "db626c292a3b0fbf618c4d64b3a0a858e73e930f5b7beb8804319284f49de577",
+        "combined_scale_uq4_28": "12c8ae056302332a7a24f0acce5e8d6864319bd84809b02670b77bfc04750569",
+        "bias_q28": "1aae2dda4016febd2765e64d20dd992319d388cc8a8690f1ae5f7984a4734dd3",
+        "output_fixed_q28": "2dcea63a160554e624edd6f1c42e28a15f17a59e4999badfabdc8a7db80a82ee",
+        "upload_payload": "190b6e13fa7607e48445e1c77a187c035c394bc9f86f351df46e5718ddab5ddd"
+      },
+      "preview": {
+        "activation_first16_int8": [0, -3, 3, 1, 4, -1, -2, 8, 4, 0, 2, -2, 0, -8, 7, 7],
+        "output_first8_q28": [-4165484, -40145457, -78923195, -1067183, -14659901, -67605637, 14333791, -13482149],
+        "output_last8_q28": [8209132, 56360333, 290930, -7693183, -28347901, 5449228, -26478883, -52431976]
+      }
+    }
+  ]
+}

@@ -1445,3 +1445,110 @@ Transformer Block、全模型分层调度、LM Head 和文本生成。
 4. 建立四组连贯真实输入、随机/边界软件参考、固定清单和完整上传载荷往返校验。
 5. 建立独立硬件流式调度，完成 PDS 全流程、多角时序、JTAG SRAM 和真实板卡逐位压力验证。
 6. `down_proj` 单独全部通过前不得进入 MLP 残差或完整 MLP。
+
+
+## 三十二、G1 `down_proj` 独立真实闭环已完成（2026-07-25）
+
+本轮严格执行路线图中的唯一下一任务，只完成 layer0 MLP `down_proj`，没有进入第二处残差、
+完整 MLP 或完整 Transformer Block。
+
+输入、参数与数值规则：
+
+- 输入直接复用 `mlp_silu_up_mul_g1` 已真实上板逐位通过的 `[4864]` signed int64 Q28；
+- 真实权重为 `model.layers.0.mlp.down_proj.weight`，shape=`[896,4864]`，group size 64，
+  每行 76 groups 的对称 signed INT4；`.p50` 中不存在 down_proj bias；
+- Q28 按实数转换为 float32，完整向量采用逐向量对称 INT8 `[-127,127]`、RNE、zero point=0；
+- combined scale=`activation_scale × weight_scale`，以 unsigned UQ4.28 RNE 编码并显式饱和；
+- 每 64 项执行 signed INT32 点积，76 组乘 scale 后在 signed int64 Q28 中精确累加；
+- 理论最坏组累加为 `56896`，完整 76 组最坏绝对值
+  `18571850900440320 < 2^63-1`，因此不允许任何隐含截断、回绕或额外饱和；
+- 输出为 `[896]` signed int64 Q28；通用 bias 槽固定全零。
+
+软件、清单与回归：
+
+- 新增 `model_tools/mlp_down_proj_reference.py`、
+  `model_tools/mlp_down_proj_g1_reference.json` 和 7 项单元测试；
+- 四组 query/count=`0/1、1/2、5/6、15/16` 的完整输出 SHA256 分别为：
+  - `20ada87fb91b6f3a286d554eed7ede0d369e417162683bb4828f4ba2d0a45da3`
+  - `05daecd0467d77bd1cf4f48be22caaece068cd844d263b46f88e016775deacec`
+  - `2e8933ddb0423cf7f7c43d7165f82ce62c128607b883f80ca942d919740a0ccf`
+  - `2dcea63a160554e624edd6f1c42e28a15f17a59e4999badfabdc8a7db80a82ee`
+- 完整载荷为 2499328 B：4864 B activation、2179072 B packed weight、
+  286720 B padded scale、28672 B zero bias；结果为 7168 B；
+- 新增单元测试 7/7 PASS，完整 `model_tools` 回归 137/137 PASS；
+- 软件固定清单、载荷往返和随机/边界 1000/1000 PASS，seed=`20260816`；
+- 覆盖全零、上游乘法极值/饱和、正负 RNE half-way tie、稀疏、一般范围和完整 int64 bit pattern；
+- 上位机 `tools/pangu_mlp_down_proj_host.py` 支持固定 case、软件 selftest、状态、
+  真实板卡压力和连续随机序列的 `--start-index`。
+
+RTL、DDR3 与协议：
+
+- 新增独立 `mlp_down_proj_g1` 工程，未修改或覆盖任何已有验证工程和位流；
+- `mlp_down_proj_core.v` 缓存 152 拍 activation 和当前行 76 拍 packed weight，
+  复用流水 MAC16，并对 304 个 16 元素 block 完成 76 组 Q28 累加；
+- 80 个 scale 槽覆盖 76 个有效 combined scale 与 4 个 padding；
+- `mlp_down_proj_ctrl.v` 实现 UART、2499328 B DDR3 上传、896 行调度、结果写回与回读；
+- 152 拍 activation 自动拆分为最多 16 拍 burst；每行 76 拍权重拆分为
+  `16+16+16+16+12`；每行 scale 固定 10 拍；每 4 行结果组成一个 256-bit beat；
+- DDR3 Controller 32-bit 地址基址：activation=`0x0000000`、weight=`0x0001000`、
+  scale=`0x0090000`、bias=`0x00a4000`、result=`0x00a8000`；
+- 固件命令为 `I/S/L/G`，标识为 `PANGU50K MLP DOWN V1`。
+
+PDS 与位流：
+
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功；
+- 详细布线 153 轮后未布线网络为 0；hold 修复 6 轮完成；
+- 资源：8915 LUT、9426 FF、70 distributed RAM、8 DRM、12 APM、79 IO；
+- `Design Summary : All Constraints Met`；
+- 慢角 core setup WNS=`+0.872 ns`、TNS=0，hold WHS=`+0.110 ns`、THS=0；
+- 快角 core setup WNS=`+3.026 ns`、TNS=0，hold WHS=`+0.015 ns`、THS=0；
+- Slow/Fast recovery、removal 和 minimum pulse width 无违例；
+- 位流：`mlp_down_proj_g1\pnr\generate_bitstream\mlp_down_proj_top.sbit`；
+- 位流大小 2101696 B；SHA256=`f4d1013a287fc27003db88905f3c61e25620d213475039ddbb14900580c46757`。
+
+真实上板：
+
+- 仅通过 JTAG 下载到 FPGA 易失性 SRAM，识别 `PANGO USB CABLE II` 与 `PGL50H`；
+- program 100%，`done bit=1`，未执行任何 Flash 擦除或写入；
+- COM20 固件标识正确，DDR3 初始化成功；
+- 四组连贯真实固定输入均为 896/896 上板逐位一致，四个输出 SHA256 与固定清单完全相同；
+- 每组 2499328 B 上传约 216.78~216.82 秒，完整计算与 7168 B 回读约 0.65 秒；
+- 真实 FPGA 随机/边界 3/3 PASS，seed=`20260816`，global index=`0..2`；
+- 三组分别覆盖全零、INT16/INT64 极值经上游饱和链形成的输入、正负 RNE half-way tie；
+- 每组 896 项均与 Python 金标准逐位一致。
+
+G1 `down_proj` 至此独立完整通过，允许进入第二处残差。
+
+## 三十三、最新项目状态与唯一下一任务
+
+当前已完成二十二级真实闭环，在完整 layer0 Attention 子层之后形成：
+
+```text
+完整 Attention 子层 residual hidden [896] signed Q6.10
+→ 真实 layer0 post_attention_layernorm
+→ 共享 INT8 激活
+├─ gate_proj Q28 → Q6.10 + PWL64 SiLU
+└─ up_proj Q28
+
+SiLU(gate) Q6.10 × up_proj Q28
+→ 完整 signed 80-bit Q38
+→ 对称 RNE >> 10 + int64 饱和
+→ MLP 中间结果 [4864] signed int64 Q28
+→ 真实 down_proj [896,4864] groupwise INT4
+→ 76-group signed int64 Q28 精确累加
+→ down_proj 输出 [896] signed int64 Q28
+```
+
+当前仍不是完整 Qwen 推理；尚未完成第二处残差和完整 MLP，亦未完成完整 Transformer Block、
+全模型分层调度、LM Head 和文本生成。
+
+### 当前唯一下一任务：G1 第二处残差
+
+1. down 分支输入必须直接来自已经真实上板逐位通过的 `down_proj` `[896]` signed int64 Q28。
+2. residual 分支必须使用进入 `post_attention_layernorm` 之前、即完整 Attention 第一处残差后的
+   `[896]` signed Q6.10 hidden state，禁止错误使用归一化输出。
+3. 冻结 down Q28→Q6.10 的 signed RNE 右移 18 位、int16 显式饱和、Q6.10 残差相加和
+   第二次显式饱和规则。
+4. 建立四组连贯真实输入、随机/边界软件参考、固定清单和上传载荷往返校验。
+5. 建立独立 RTL 与流式调度，完成 PDS、多角时序、JTAG SRAM 和真实板卡逐位压力。
+6. 第二处残差单独全部通过前不得勾选“完整 MLP 与软件参考比较”，也不得进入完整 Transformer Block。

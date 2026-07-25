@@ -126,6 +126,8 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `mlp_silu_g1_reference.json` | G1 四组真实 `SiLU(gate)` 完整输出、PWL 端点和上传载荷 SHA256 清单 |
 | `mlp_silu_up_mul_reference.py` | G1 `SiLU(gate) × up` 完整 signed 80-bit Q38 乘积、RNE 和 int64 饱和金标准 |
 | `mlp_silu_up_mul_g1_reference.json` | G1 四组真实逐元素乘法完整输出和 48640 B 载荷 SHA256 清单 |
+| `mlp_down_proj_reference.py` | G1 verified Q28 输入量化、真实 `[896,4864]` down_proj、76-group Q28 累加与载荷金标准 |
+| `mlp_down_proj_g1_reference.json` | G1 四组真实 down_proj 完整输出、2499328 B 载荷和边界 SHA256 清单 |
 | `embedding_fixed_reference.py` | E3 Token 行地址、真实 packed INT4/FP16 scale 到 UQ4.28/Q6.10 的硬件等价参考 |
 | `embedding_k896_reference.json` | E3 固定 Token 的地址、载荷、输出范围和 SHA256 清单 |
 | `test_p50_format.py` | 使用独立微型镜像验证解析、解包、反量化和错误检测 |
@@ -142,6 +144,7 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `test_elementwise_fixed_reference.py` | E2 RNE、饱和、完整 int16 SiLU 误差和 1000 轮软件压力测试 |
 | `test_mlp_silu_reference.py` | G1 Q28 RNE tie、INT64 极值、尾部、饱和、载荷和四组真实 gate 测试 |
 | `test_mlp_silu_up_mul_reference.py` | G1 正负 RNE half-way tie、完整 80 位乘积、双向饱和、载荷和真实输入测试 |
+| `test_mlp_down_proj_reference.py` | G1 shape、Q28→float32、UQ4.28 饱和、INT64 安全、载荷和真实来源测试 |
 | `test_embedding_fixed_reference.py` | E3 Token 边界、地址、RNE、饱和、全部真实 scales 和 1000 个随机 Token 测试 |
 
 ## 6. 常用命令
@@ -555,3 +558,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 新增单元测试 7/7 PASS；完整 `model_tools` 回归 130/130 PASS；
 - 软件随机/边界压力 1000/1000 PASS，seed=`20260815`，覆盖全零、正负 RNE half-way tie、真实范围、稀疏、完整 int16/int64 bit pattern、`INT64_MIN/MAX` 和正负饱和；
 - 固定清单：`mlp_silu_up_mul_g1_reference.json`；上位机：`../tools/pangu_mlp_silu_up_mul_host.py`；独立工程说明：`../mlp_silu_up_mul_g1/README.md`。
+
+
+2026-07-25 建立 G1 layer0 MLP `down_proj` 真实完整投影软件参考：
+
+- 输入直接复用 G1 `SiLU(gate) × up` 四组已经真实上板逐位通过的 `[4864]` signed int64 Q28 输出，query/count 为 `0/1`、`1/2`、`5/6`、`15/16`；
+- 真实权重为 `model.layers.0.mlp.down_proj.weight`，shape=`[896,4864]`、group size 64、每行 76 groups 的对称 signed INT4；真实 `.p50` 中不存在 bias；
+- Q28 输入按实数转换为 float32，再按逐向量对称规则量化为 INT8 `[-127,127]`，RNE、zero point=0；combined scale 使用 unsigned UQ4.28 RNE 与显式饱和；
+- 每 64 项形成 signed INT32 点积，76 组乘 scale 后在 signed int64 Q28 中精确累加；理论最坏绝对累加 `18571850900440320 < 2^63-1`；
+- 四组输出 SHA256 为 `20ada87f...5da3`、`05daecd0...acec`、`2e8933dd...a0ccf`、`2dcea63a...82ee`；
+- 完整上传载荷为 2499328 B：4864 B activation、2179072 B packed weight、286720 B padded scale 和 28672 B zero bias；结果为 7168 B；
+- 新增单元测试 7/7 PASS；完整 `model_tools` 回归 137/137 PASS；
+- 软件随机/边界压力 1000/1000 PASS，seed=`20260816`，覆盖全零、上游乘法极值/饱和、正负 RNE half-way tie、稀疏、一般范围和完整 int64 bit pattern；
+- 固定清单：`mlp_down_proj_g1_reference.json`；上位机：`../tools/pangu_mlp_down_proj_host.py`；独立工程说明：`../mlp_down_proj_g1/README.md`。

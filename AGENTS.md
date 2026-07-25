@@ -32,4 +32,4 @@
 - 开发板：盘古 Logos 50K / MES50HP
 - DDR3：32 位 Controller + PHY，完整 1 GiB 已验证
 - 模型目标：Qwen2.5-0.5B + LoRA，权重已转换为约 251.63 MiB 的 INT4 文件
-- 当前阶段：D1.3、D2、E1-E3、F1-F6 已完成，完整 layer0 Attention 子层已真实上板闭环；G1 的 `post_attention_layernorm`、`gate_proj`、`up_proj` 和独立 `SiLU(gate)` 也已完成。最新 `SiLU(gate)` 使用 Q28→Q6.10 signed RNE、显式饱和和 E2 PWL64，四组连贯真实输出全部 4864/4864 逐位一致，完整软件回归 123/123 PASS、软件随机/边界 1000/1000 PASS、真实 FPGA 300/300 PASS，多角时序 TNS/THS=0。当前唯一下一任务是独立完成 `SiLU(gate) × up`；该乘法通过前不得进入 down projection，也不得覆盖任何已有验证工程和位流
+- 当前阶段：D1.3、D2、E1-E3、F1-F6 已完成，完整 layer0 Attention 子层已真实上板闭环；G1 的 `post_attention_layernorm`、`gate_proj`、`up_proj`、`SiLU(gate)`、`SiLU(gate) × up` 和独立 `down_proj` 已完成。最新 `down_proj` 使用 verified `[4864]` Q28 输入、逐向量对称 INT8、真实 `[896,4864]` groupwise INT4 权重、UQ4.28 combined scale 和 76 组 signed int64 Q28 精确累加；四组连贯真实输出全部 896/896 逐位一致，完整软件回归 137/137 PASS、软件随机/边界 1000/1000 PASS、真实 FPGA 固定 4/4 与压力 3/3 PASS，多角时序 TNS/THS=0。当前唯一下一任务是独立完成 MLP 第二处残差；该残差通过前不得勾选完整 MLP 或进入完整 Transformer Block，也不得覆盖任何已有验证工程和位流
