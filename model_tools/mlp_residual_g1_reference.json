@@ -1,0 +1,141 @@
+{
+  "format_version": 1,
+  "operator": "qwen2_layer0_mlp_second_residual",
+  "definition": {
+    "residual_source": "verified complete Attention first-residual output before post_attention_layernorm",
+    "residual_input": "signed int16 Q6.10 [896]",
+    "down_source": "verified layer0 MLP down_proj output",
+    "down_input": "signed int64 Q28 [896]",
+    "down_rescale": "signed RNE right shift 18, then signed int16 saturation",
+    "residual_add": "sign-extended Q6.10 add, then signed int16 saturation",
+    "output": "signed int16 Q6.10 [896]",
+    "upload_bytes": 8960,
+    "result_bytes": 1792,
+    "fixed_queries": [
+      0,
+      1,
+      5,
+      15
+    ],
+    "forbidden_residual_source": "post_attention_layernorm output",
+    "forbidden_next_operation": "complete MLP / Transformer Block before this residual passes"
+  },
+  "cases": [
+    {
+      "label": "layer0 MLP second residual query=0, count=1",
+      "query_position": 0,
+      "count": 1,
+      "down_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "range": {
+        "residual_hidden_q10_min": -4098,
+        "residual_hidden_q10_max": 4094,
+        "down_proj_q28_min": -105978992,
+        "down_proj_q28_max": 111407943,
+        "output_q10_min": -4207,
+        "output_q10_max": 4211
+      },
+      "sha256": {
+        "residual_hidden_q10": "36859690e421b96cb8db65a5760a364d165a73b63fd1121040a7d1b42c042eb7",
+        "down_proj_q28": "20ada87fb91b6f3a286d554eed7ede0d369e417162683bb4828f4ba2d0a45da3",
+        "down_proj_q10": "671ff7f8c7386cd7e5e9e56f8ae6b912c941ab94d07bf18ae7b698afdcc82cde",
+        "output_q10": "630952eaf6fe179639773f2b60d1e9e990f380b0e698fa3d493dd7c279c96104",
+        "upload_payload": "83b6f2d7279509a6c01bff94a30bdf0a173759bc841cce0d4e5dd09c0d26d275"
+      },
+      "preview": {
+        "residual_first8_q10": [-1527, -4025, 2071, 454, -2516, 1200, 682, 1326],
+        "down_first8_q28": [-52450259, -2906548, -2814512, -33134401, -49943582, -5725367, -47286725, -20997832],
+        "down_first8_q10": [-200, -11, -11, -126, -191, -22, -180, -80],
+        "output_first8_q10": [-1727, -4036, 2060, 328, -2707, 1178, 502, 1246],
+        "output_last8_q10": [-1162, 272, -3630, -816, -3578, -2894, 450, -1949]
+      }
+    },
+    {
+      "label": "layer0 MLP second residual query=1, count=2",
+      "query_position": 1,
+      "count": 2,
+      "down_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "range": {
+        "residual_hidden_q10_min": -4081,
+        "residual_hidden_q10_max": 4066,
+        "down_proj_q28_min": -136670147,
+        "down_proj_q28_max": 129518677,
+        "output_q10_min": -4183,
+        "output_q10_max": 4555
+      },
+      "sha256": {
+        "residual_hidden_q10": "2b4a2d9240e6e30c2afe2943fa30ac60decd47f8fc8d377ab7e530e516009378",
+        "down_proj_q28": "05daecd0467d77bd1cf4f48be22caaece068cd844d263b46f88e016775deacec",
+        "down_proj_q10": "872f4a098eb5a52072dd6364b68f7f74bccf17ed8d5fe8fd9e7600272fe3a00b",
+        "output_q10": "1cd96d92e43203abda26cace446c2664a0cbaa1fad29a8658a0d94941fbfbea7",
+        "upload_payload": "e608d35cf8048aa85bd4c61edcb16baa51c1d7626294ab662de1f1e93f588b54"
+      },
+      "preview": {
+        "residual_first8_q10": [-721, -2222, -3784, -3833, 2525, -3607, 3509, -2483],
+        "down_first8_q28": [-34297893, 6038927, -16367230, 39449920, 47899581, -68226486, 30732471, 30297303],
+        "down_first8_q10": [-131, 23, -62, 150, 183, -260, 117, 116],
+        "output_first8_q10": [-852, -2199, -3846, -3683, 2708, -3867, 3626, -2367],
+        "output_last8_q10": [1117, -17, -2854, -2488, -3381, 869, 1900, 3986]
+      }
+    },
+    {
+      "label": "layer0 MLP second residual query=5, count=6",
+      "query_position": 5,
+      "count": 6,
+      "down_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "range": {
+        "residual_hidden_q10_min": -4091,
+        "residual_hidden_q10_max": 4095,
+        "down_proj_q28_min": -134181466,
+        "down_proj_q28_max": 366860667,
+        "output_q10_min": -4392,
+        "output_q10_max": 4316
+      },
+      "sha256": {
+        "residual_hidden_q10": "c0c0776d71e3dc97aa1a4d4e0709f38441cc82717c0c3081a79c47c30a21af10",
+        "down_proj_q28": "2e8933ddb0423cf7f7c43d7165f82ce62c128607b883f80ca942d919740a0ccf",
+        "down_proj_q10": "d8d3a0002c245327d9555689a4bf8349ccd6dcf8b80d23c4654ddacc9ce7f183",
+        "output_q10": "b2365afdc2857c543628c9d15fd829005ede98aa99d35a8c4f973f61b35ed9dc",
+        "upload_payload": "d3b9923e2695112993c6cd3ba09b8cfad48f0784202385f3e046fdce410ac25d"
+      },
+      "preview": {
+        "residual_first8_q10": [2543, -3183, -2628, 3589, -1884, 1767, -1551, -1325],
+        "down_first8_q28": [1732926, -53001699, -8482623, -4875148, -28082902, -21045684, 8824166, 93866536],
+        "down_first8_q10": [7, -202, -32, -19, -107, -80, 34, 358],
+        "output_first8_q10": [2550, -3385, -2660, 3570, -1991, 1687, -1517, -967],
+        "output_last8_q10": [1220, -59, -1195, -2314, -3569, -226, -82, 2970]
+      }
+    },
+    {
+      "label": "layer0 MLP second residual query=15, count=16",
+      "query_position": 15,
+      "count": 16,
+      "down_rescale_saturated_count": 0,
+      "residual_saturated_count": 0,
+      "range": {
+        "residual_hidden_q10_min": -4070,
+        "residual_hidden_q10_max": 4095,
+        "down_proj_q28_min": -175208055,
+        "down_proj_q28_max": 111607679,
+        "output_q10_min": -4400,
+        "output_q10_max": 4255
+      },
+      "sha256": {
+        "residual_hidden_q10": "7e61dc1fd0eb43b231e25fe1d08b1c08342723f537b6e25924858608235fa61e",
+        "down_proj_q28": "2dcea63a160554e624edd6f1c42e28a15f17a59e4999badfabdc8a7db80a82ee",
+        "down_proj_q10": "5a3cc8bb8bd469e7507635a5f4ecece47cb3c98991bb344ee0cf11d194956c97",
+        "output_q10": "c164aab5251afc3954b8689a826a1241d1c7d6757adef5c5a232e127b59a4032",
+        "upload_payload": "ffe41c8a17681e4d01f23fe3e3653658fa565cbdabfa85c7b3e5661ff21884a8"
+      },
+      "preview": {
+        "residual_first8_q10": [2482, -1546, -3831, 1644, -619, 2918, 2176, 1549],
+        "down_first8_q28": [-4165484, -40145457, -78923195, -1067183, -14659901, -67605637, 14333791, -13482149],
+        "down_first8_q10": [-16, -153, -301, -4, -56, -258, 55, -51],
+        "output_first8_q10": [2466, -1699, -4132, 1640, -675, 2660, 2231, 1498],
+        "output_last8_q10": [-2123, -778, 2997, 3516, -2950, -3259, -908, -3416]
+      }
+    }
+  ]
+}

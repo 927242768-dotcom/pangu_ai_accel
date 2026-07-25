@@ -29,10 +29,11 @@
 23. [`mlp_silu_g1/README.md`](mlp_silu_g1/README.md)：已验证的 gate Q28→Q6.10 signed RNE、PWL64 `SiLU(gate)` 和完整 `[4864]` 非线性闭环。
 24. [`mlp_silu_up_mul_g1/README.md`](mlp_silu_up_mul_g1/README.md)：已验证的完整 signed 80-bit Q38 乘积、RNE、int64 饱和和 `[4864]` `SiLU(gate) × up` 闭环。
 25. [`mlp_down_proj_g1/README.md`](mlp_down_proj_g1/README.md)：已验证的真实 layer0 `down_proj=[896,4864]`、76-group INT4/UQ4.28 和完整 `[896]` Q28 闭环。
+26. [`mlp_residual_g1/README.md`](mlp_residual_g1/README.md)：已验证的正确 residual 支路、down Q28→Q6.10 RNE、两级饱和和完整 layer0 MLP 闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、第一处残差的完整 layer0 Attention 子层，以及 G1 MLP 输入 `post_attention_layernorm`、gate/up 双投影、独立 `SiLU(gate)`、`SiLU(gate) × up` 和真实 `down_proj` 闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、第一处残差的完整 layer0 Attention 子层，以及 G1 MLP 输入 `post_attention_layernorm`、gate/up 双投影、`SiLU(gate)`、`SiLU(gate) × up`、真实 `down_proj` 和第二处残差；完整 layer0 MLP 已闭环：
 
 ```text
 长度16单点积：
@@ -90,15 +91,16 @@ G1 MLP `SiLU(gate) × up` 现已完成。独立工程 `mlp_silu_up_mul_g1` 直�
 
 G1 MLP `down_proj` 现已完成。独立工程 `mlp_down_proj_g1` 直接消费上述 verified `[4864]` signed int64 Q28 乘法输出，读取真实 `model.layers.0.mlp.down_proj.weight=[896,4864]`，按逐向量对称 INT8、UQ4.28 combined scale、64 元素分组点积和 76 组 signed int64 Q28 精确累加输出 `[896]`；真实模型无 bias。四组 query/count=`0/1、1/2、5/6、15/16` 全部 `896/896` 上板逐位一致；新增测试 `7/7 PASS`，完整软件回归 `137/137 PASS`，软件随机/边界 `1000/1000 PASS`，真实 FPGA 全零、极值/饱和和 RNE tie `3/3 PASS`。PDS `All Constraints Met`，慢角 setup WNS=`+0.872 ns`、hold WHS=`+0.110 ns`，快角 setup WNS=`+3.026 ns`、hold WHS=`+0.015 ns`，TNS/THS 全 0；验收位流 SHA256=`f4d1013a287fc27003db88905f3c61e25620d213475039ddbb14900580c46757`。
 
+G1 MLP 第二处残差与完整 MLP 现已完成。独立工程 `mlp_residual_g1` 严格使用完整 Attention 第一处残差后的 `[896]` signed Q6.10 hidden，而不是 `post_attention_layernorm` 输出；down 分支使用已验证 `[896]` signed int64 Q28。硬件执行 signed RNE `>>18`、第一次 int16 饱和、残差相加和第二次 int16 饱和。四组连贯真实固定输入全部 `896/896` 上板逐位一致；新增测试 `5/5 PASS`，完整软件回归 `142/142 PASS`，软件随机/边界 `1000/1000 PASS`，同一 seed 连续真实 FPGA index=`0..299` 累计 `300/300 PASS`。PDS `All Constraints Met`，慢角 setup WNS=`+0.727 ns`、hold WHS=`+0.169 ns`，快角 setup WNS=`+3.298 ns`、hold WHS=`+0.100 ns`，TNS/THS 全 0；验收位流 SHA256=`ddc424fae630fda5ab55acc8d2cb12d80b3f8cca1d5341f4a455ec0aa0a0e42b`。
+
 ## 当前唯一下一任务
 
 ```text
-独立完成 layer0 MLP 第二处残差。输入一侧使用已经真实上板逐位通过的 `down_proj`
-`[896]` signed int64 Q28，另一侧使用进入 `post_attention_layernorm` 之前的完整 Attention
-第一处残差 `[896]` signed Q6.10 hidden state。先冻结 Q28→Q6.10 的 signed RNE 右移 18 位、
-显式饱和、signed Q6.10 残差相加和第二次饱和规则，再完成软件金标准、独立 RTL/PDS、多角
-时序、JTAG SRAM 和真实上板逐位压力。第二处残差单独通过前不得勾选完整 MLP，也不得进入
-完整 Transformer Block。
+建立独立的完整 layer0 Transformer Block 集成闭环。从同一组 block hidden state 连贯执行
+input RMSNorm、Q/K/V、RoPE、KV Cache/Attention、O_proj、第一处残差、post-attention
+RMSNorm、gate/up、SiLU、逐元素乘法、down_proj 和第二处残差，并与完整软件参考逐位比较。
+完成独立调度/地址/握手、PDS 多角时序、JTAG SRAM、多组真实 hidden state 和随机/边界上板
+压力。完整 Block 通过前不得进入 28 层全模型调度、LM Head 或文本生成。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

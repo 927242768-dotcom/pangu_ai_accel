@@ -571,3 +571,16 @@ fixed_error_bound = (sum(abs(acc)) + 1) * 0.5 / 2^28
 - 新增单元测试 7/7 PASS；完整 `model_tools` 回归 137/137 PASS；
 - 软件随机/边界压力 1000/1000 PASS，seed=`20260816`，覆盖全零、上游乘法极值/饱和、正负 RNE half-way tie、稀疏、一般范围和完整 int64 bit pattern；
 - 固定清单：`mlp_down_proj_g1_reference.json`；上位机：`../tools/pangu_mlp_down_proj_host.py`；独立工程说明：`../mlp_down_proj_g1/README.md`。
+
+
+2026-07-25 建立 G1 layer0 MLP 第二处残差与完整 MLP 软件参考：
+
+- residual 分支直接使用 F6 完整 Attention 第一处残差后的 `[896]` signed int16 Q6.10 输出，明确禁止使用 `post_attention_layernorm` 归一化输出；
+- down 分支直接使用 G1 `down_proj` 已验证的 `[896]` signed int64 Q28 输出；四组数据按相同 query/count=`0/1、1/2、5/6、15/16` 严格配对；
+- down Q28 使用正负对称 RNE 右移 18 位，先显式饱和到 signed int16 Q6.10，再与 residual hidden 符号扩展相加并执行第二次 int16 饱和；
+- `INT64_MIN` 使用无符号二补码幅值路径；随机/边界覆盖正负 half-way tie、`INT64_MIN/MAX`、Q10 饱和边缘、重标定饱和和最终残差饱和；
+- 四组完整 MLP 输出 SHA256 为 `630952ea...6104`、`1cd96d92...bea7`、`b2365afd...e9dc`、`c164aab5...4032`；
+- 固定上传载荷为 8960 B：1792 B residual Q6.10 与 7168 B down Q28；结果为 1792 B signed Q6.10；
+- 新增单元测试 5/5 PASS；完整 `model_tools` 回归 142/142 PASS；
+- 软件固定清单、载荷往返和随机/边界压力 1000/1000 PASS，seed=`20260817`；
+- 固定清单：`mlp_residual_g1_reference.json`；上位机：`../tools/pangu_mlp_residual_host.py`；独立工程说明：`../mlp_residual_g1/README.md`。

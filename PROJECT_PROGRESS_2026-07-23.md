@@ -1552,3 +1552,106 @@ SiLU(gate) Q6.10 × up_proj Q28
 4. 建立四组连贯真实输入、随机/边界软件参考、固定清单和上传载荷往返校验。
 5. 建立独立 RTL 与流式调度，完成 PDS、多角时序、JTAG SRAM 和真实板卡逐位压力。
 6. 第二处残差单独全部通过前不得勾选“完整 MLP 与软件参考比较”，也不得进入完整 Transformer Block。
+
+
+## 三十四、G1 第二处残差与完整 MLP 真实闭环已完成（2026-07-25）
+
+本轮严格执行路线图中的唯一下一任务，只完成 layer0 MLP 第二处残差；在该任务通过后，
+才将“完整 MLP 与软件参考比较”标记为完成，没有进入完整 Transformer Block。
+
+正确数据支路与数值规则：
+
+- residual 分支使用进入 `post_attention_layernorm` 之前、即完整 Attention 第一处残差后的
+  `[896]` signed int16 Q6.10 hidden state；禁止使用 post-attention RMSNorm 输出；
+- down 分支使用已经真实上板逐位通过的 `down_proj` `[896]` signed int64 Q28；
+- 四组输入按相同 query/count=`0/1、1/2、5/6、15/16` 严格配对；
+- down Q28 对绝对值执行 signed RNE 右移 18 位并恢复符号，`INT64_MIN` 使用无符号二补码幅值；
+- 重标定结果第一次显式饱和到 signed int16 Q6.10；
+- 两路符号扩展相加，最终第二次显式饱和到 signed int16 Q6.10；
+- 输出为完整 layer0 MLP `[896]` signed int16 Q6.10。
+
+软件、清单与回归：
+
+- 新增 `model_tools/mlp_residual_reference.py`、
+  `model_tools/mlp_residual_g1_reference.json` 和 5 项单元测试；
+- 四组最终输出 SHA256：
+  - `630952eaf6fe179639773f2b60d1e9e990f380b0e698fa3d493dd7c279c96104`
+  - `1cd96d92e43203abda26cace446c2664a0cbaa1fad29a8658a0d94941fbfbea7`
+  - `b2365afdc2857c543628c9d15fd829005ede98aa99d35a8c4f973f61b35ed9dc`
+  - `c164aab5251afc3954b8689a826a1241d1c7d6757adef5c5a232e127b59a4032`
+- 每组 residual SHA256 与 F6 第一处残差输出完全一致，down SHA256 与 G1 `down_proj` 输出完全一致；
+- 上传载荷为 8960 B：1792 B residual Q6.10 与 7168 B down Q28；结果为 1792 B；
+- 新增测试 5/5 PASS，完整 `model_tools` 回归 142/142 PASS；
+- 上位机 selftest、固定清单和载荷往返通过；
+- 软件随机/边界 1000/1000 PASS，seed=`20260817`；
+- 覆盖全零、正负 RNE half-way tie、`INT64_MIN/MAX`、Q10 饱和边缘、一般范围、
+  第一次饱和和最终残差饱和。
+
+RTL、DDR3 与协议：
+
+- 新增独立 `mlp_residual_g1` 工程，未修改或覆盖任何已有验证工程和位流；
+- `mlp_residual_core.v` 使用 1 个 hidden 缓存和 4 个 down bank；每个 256-bit 结果 beat
+  读取 16 个 hidden 与 16 个 down 元素，并逐 lane 完成幅值、RNE、两级饱和和打包；
+- `mlp_residual_ctrl.v` 实现 UART、DDR3 上传、最大 16 拍 burst 分段读取、核心调度、
+  结果写回与回读；
+- DDR3 Controller 32-bit 地址基址：hidden=`0x0000000`、down=`0x0001000`、
+  result=`0x0003000`；
+- 固件命令为 `I/S/L/G`，标识为 `PANGU50K MLP RESIDUAL V1`。
+
+PDS 与位流：
+
+- PDS Compile、Synthesize、Device Map、Place & Route、Timing 和 Bitstream 全部成功；
+- 详细布线 89 轮后未布线网络为 0；hold 修复 3 轮；
+- 资源：7705 LUT、6868 FF、70 distributed RAM、20 DRM、0 APM、79 IO；
+- `Design Summary : All Constraints Met`；
+- 慢角 core setup WNS=`+0.727 ns`、TNS=0，hold WHS=`+0.169 ns`、THS=0；
+- 快角 core setup WNS=`+3.298 ns`、TNS=0，hold WHS=`+0.100 ns`、THS=0；
+- Slow/Fast recovery、removal 和 minimum pulse width 无违例；
+- 位流：`mlp_residual_g1\pnr\generate_bitstream\mlp_residual_top.sbit`；
+- 位流大小 2101696 B；SHA256=`ddc424fae630fda5ab55acc8d2cb12d80b3f8cca1d5341f4a455ec0aa0a0e42b`。
+
+真实上板：
+
+- 仅通过 JTAG 下载到 FPGA 易失性 SRAM，识别 `PANGO USB CABLE II` 与 `PGL50H`；
+- program 100%，`done bit=1`，未执行任何 Flash 擦除或写入；
+- COM20 固件标识正确，DDR3 初始化成功；
+- 四组连贯真实固定输入全部 896/896 上板逐位一致，四个输出 SHA256 与固定清单完全相同；
+- 固定四组耗时约 3.94 秒；
+- 同一 seed=`20260817` 连续随机/边界 index=`0..299` 分三批完成 300/300 PASS；
+- 三批耗时约 98.79、98.78、98.74 秒；每组 896 项均与 Python 金标准逐位一致。
+
+G1 第二处残差和完整 layer0 MLP 至此真实闭环完成。
+
+## 三十五、最新项目状态与唯一下一任务
+
+当前已完成二十三级真实闭环，layer0 的 Attention 子层和 MLP 子层均已分别建立连贯软件参考、
+独立 PDS 工程和真实 FPGA 逐位闭环：
+
+```text
+block hidden [896] signed Q6.10
+→ input RMSNorm
+→ Q/K/V → RoPE → KV Cache/Attention → O_proj
+→ 第一处残差 [896] signed Q6.10
+→ post_attention_layernorm
+→ gate_proj / up_proj
+→ SiLU(gate) × up
+→ down_proj [896] signed int64 Q28
+→ signed RNE >> 18 + 第一次 Q6.10 饱和
+→ 与第一处残差后的 hidden 相加 + 第二次饱和
+→ 完整 layer0 MLP / Block 候选输出 [896] signed Q6.10
+```
+
+当前仍不是完整 Qwen 推理。虽然所有单算子和完整 Attention、完整 MLP 已分别通过，但尚未建立
+一个独立工程从同一 block hidden state 连贯调度全部算子，也未完成 28 层分层调度、LM Head
+或文本生成。
+
+### 当前唯一下一任务：G2 完整 layer0 Transformer Block 集成
+
+1. 从同一组 block hidden state 出发，建立完整 layer0 Block 软件参考并冻结全部中间张量。
+2. 连贯执行 input RMSNorm、Q/K/V、RoPE、KV Cache/Attention、O_proj、第一处残差、
+   post_attention_layernorm、gate/up、SiLU、逐元素乘法、down_proj 和第二处残差。
+3. 复用已验证数值定义，但新建独立集成调度、DDR3 地址表、状态机和握手边界，不覆盖历史工程。
+4. 建立多组真实 hidden state、随机/边界输入、固定清单和关键中间结果 SHA256。
+5. 完成 PDS Compile/Synthesize/Map/PnR/Timing/Bitstream，全角 TNS/THS 必须为 0。
+6. 仅通过 JTAG SRAM 下载，完成完整 Block 固定与随机/边界真实板卡逐位压力。
+7. 完整 Block 单独全部通过前不得进入 28 层全模型调度、LM Head 或文本生成。
