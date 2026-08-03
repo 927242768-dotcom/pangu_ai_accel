@@ -725,12 +725,24 @@ G2.1 软件全链参考、运行时量化闭环与集成契约（2026-07-25 至 
 - [x] 验收位流 `transformer_block_g2/pnr/generate_bitstream/transformer_block_top.sbit`，大小 2101696 B，SHA256=`e4c3494152498583ae4a25540363fe3e828483fa7c0012a117e26e17fc557403`；通过专用脚本仅下载 JTAG SRAM，进度 100%、DONE bit=1，未执行 Flash 擦除或编程；固件 `PANGU50K G2 BLOCK V1`，DDR3 初始化成功；
 - [x] 四组固定真实 hidden query/count=`0/1、1/2、5/6、15/16` 全部完成 18 个中间/最终张量逐位比较，共 `4/4` 用例、`72/72` 张量 PASS；最终输出 SHA256 与软件/G1 固定清单完全一致；
 - [x] 完整 Block 板级随机/地址边界 `8/8 PASS`，seed=`20260820`，覆盖 count=`1/2/16`、四组随机窗口以及 query=`16383`、window=`16368..16383` 的 1 GiB KV Cache 末端；另完成交替 `INT16_MAX/MIN`、全 `INT16_MAX`、全 `INT16_MIN` 三组 hidden 数值边界，每组 18/18 张量 PASS，并分别触发第一/第二残差饱和 `434/443`、`391/456`、`403/431` 项；
-- [x] 最终板卡状态 `block_busy=0、block_error=0、protocol_error=0、stage=IDLE、error_code=0`。G2 单个完整 layer0 Transformer Block 至此真实闭环完成，现允许进入阶段 H 的完整模型分层调度，但尚未开始 28 层、LM Head 或文本生成。
+- [x] 最终板卡状态 `block_busy=0、block_error=0、protocol_error=0、stage=IDLE、error_code=0`。G2 单个完整 layer0 Transformer Block 至此真实闭环完成，现允许进入阶段 H 的完整模型分层调度，但尚未开始真实 24 层连续执行、LM Head 或文本生成。
 
 ## 阶段 H：完整模型分层调度
 
-- [ ] 建立模型层描述表
-- [ ] 为每个张量记录 DDR3/主机文件偏移、形状和量化参数
+- [x] 建立模型层描述表
+- [x] 为每个张量记录 DDR3/主机文件偏移、形状和量化参数
+
+H1 模型层描述与主机文件偏移契约（2026-08-03，已完成）：
+
+- [x] 新增 `model_tools/model_layer_descriptor.py`、冻结清单 `model_layer_descriptor_reference.json` 和 `test_model_layer_descriptor.py`；真实 `.p50` 与外部 JSON 已完整交叉校验；
+- [x] 纠正“模型实际层数”和“硬件容量”混淆：当前 Qwen2.5-0.5B 镜像 `num_hidden_layers=24`，层号连续 `0..23`；现有 KV/控制地址契约容量为 28 层，因此仅有 24 个活动层和 4 个未用容量槽，后续调度不得执行不存在的 layer24..27；
+- [x] 纠正上下文上限差异：模型元数据 `max_position_embeddings=32768`，当前硬件 KV Cache 上限为 16384，阶段 H/I 第一版必须显式按硬件上限约束；
+- [x] 冻结 290 个真实张量：2 个全局张量、24×12=288 个层内张量；Embedding 与 LM Head 权重 tied，共用 `model.embed_tokens.weight=[151936,896]`，另有最终 `model.norm.weight=[896]`；
+- [x] 24 层结构完全同构：首层文件偏移 `72851456`，层步长 `7958528 B`，每层有效跨度 `7955456 B`，层间 4 KiB 对齐间隙 `3072 B`；12 类张量的 shape、INT4/FP16、data/scale 相对偏移、长度、group 数均冻结为层模板；
+- [x] 描述器可展开任意层或全部层，已把 288 个层内张量的绝对 data/scale 主机文件偏移逐项与 P50 原目录比较；H1 新增 `9/9 PASS`，完整 `model_tools` 回归 `196/196 PASS`。
+
+当前唯一实施点：基于该 24 层描述表设计权重流式加载/按层重载方案，并同步冻结 1 GiB DDR3 的参数缓冲、hidden 双缓冲、scratch、KV Cache 和 GEMV 输出分区；在该内存方案完成前不得开始层间调度 RTL。
+
 - [ ] 设计权重流式加载方案
 - [ ] 决定模型权重是否常驻 DDR3 或按层重载
 - [ ] 设计 1 GiB DDR3 内存分区

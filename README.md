@@ -100,9 +100,10 @@ G2 完整 layer0 Transformer Block 已完成独立验收。`model_tools/transfor
 
 ```text
 G2 单个完整 layer0 Transformer Block 已完成软件、PDS、多角时序、JTAG SRAM、固定真实 hidden、
-地址末端、随机窗口和正负饱和边界闭环。下一步进入阶段 H：建立完整模型分层调度、权重流式加载、
-DDR3 分区与 hidden 双缓冲，先实现从第 0 层到最后一层的逐层执行。当前尚未开始 28 层调度、
-最终 RMSNorm、LM Head、logits 或文本生成，必须继续按 PROJECT_ROADMAP.md 顺序实施。
+地址末端、随机窗口和正负饱和边界闭环。阶段 H1 的真实模型层描述表也已完成：当前 P50 实际为
+24 层（layer0..23），现有硬件地址契约容量为 28 层；290 个张量及 288 个层内 data/scale 文件偏移
+已经逐项冻结并通过 196/196 软件回归。下一步设计按层权重流式加载和 1 GiB DDR3 分区，再实现真实
+24 层连续调度。当前尚未开始最终 RMSNorm、LM Head、logits 或文本生成。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

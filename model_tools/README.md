@@ -14,6 +14,10 @@ SHA256：f0c0a22886499715fe16832b88ac59bff48fea8f3069c247437726aca6f19e9d
 
 - 169 个二维 `int4_groupwise_symmetric` 张量；
 - 121 个连续 `float16` 张量；
+- 2 个全局张量：tied Embedding/LM Head 权重和最终 RMSNorm 权重；
+- 真实模型为 **24 层**（layer0..23），每层 12 个张量，共 288 个层内张量；
+- 现有 KV/控制硬件容量为 28 层，但后续调度只允许执行真实存在的 24 层；
+- 模型元数据位置上限为 32768，当前硬件 KV Cache 上限为 16384；
 - INT4/FP16 主数据合计约 235.68 MiB；
 - FP16 分组 scale 合计约 14.72 MiB。
 
@@ -99,6 +103,9 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `p50_format.py` | 轻量解析库；校验头、目录、长度、偏移并提取张量 |
 | `p50_inspect.py` | 摘要、目录查看、全量校验、行/块提取 CLI |
 | `verify_p50_image.py` | 在结构全量校验基础上，对照源模型抽样验证量化误差 |
+| `model_layer_descriptor.py` | H1 真实 24 层描述生成器；冻结层模板、主机 data/scale 文件偏移、模型/硬件容量差异并支持按层展开 |
+| `model_layer_descriptor_reference.json` | 24 层、290 张量、层步长和 tied LM Head 的冻结机器可读契约 |
+| `test_model_layer_descriptor.py` | 将 24×12 个层内张量的绝对偏移、形状、存储和量化字段逐项与真实 P50 目录比较 |
 | `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
 | `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
@@ -172,6 +179,25 @@ python model_tools\p50_inspect.py list --contains self_attn.q_proj.weight
 ```bat
 python model_tools\p50_inspect.py describe ^
   --tensor model.layers.0.self_attn.q_proj.weight
+```
+
+查看并验证阶段 H1 的完整模型层描述表：
+
+```bat
+python -m model_tools.model_layer_descriptor summary
+python -m model_tools.model_layer_descriptor verify
+```
+
+展开任意真实层的 12 个张量及其绝对主机文件偏移：
+
+```bat
+python -m model_tools.model_layer_descriptor layer 23
+```
+
+展开全部 24 层供后续权重加载器或微码生成器消费：
+
+```bat
+python -m model_tools.model_layer_descriptor all-layers
 ```
 
 按张量名提取任意一行：

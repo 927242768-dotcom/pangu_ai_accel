@@ -2198,4 +2198,98 @@ stage             = IDLE
 error_code        = 0
 ```
 
-G2 单个完整 layer0 Transformer Block 至此完成真实板级闭环。下一步允许进入阶段 H：完整模型分层调度、权重流式加载、DDR3 分区和 hidden 双缓冲。当前尚未实现或验证 28 层连续执行、最终 RMSNorm、LM Head、logits 或文本生成。
+G2 单个完整 layer0 Transformer Block 至此完成真实板级闭环。下一步允许进入阶段 H：完整模型分层调度、权重流式加载、DDR3 分区和 hidden 双缓冲。当前尚未实现或验证真实 24 层连续执行、最终 RMSNorm、LM Head、logits 或文本生成。
+
+
+## 四十三、H1 真实模型层描述表与主机文件偏移契约（2026-08-03）
+
+阶段 H 的第一步不是立即编写 28 层调度 RTL，而是先从真实 `.p50` 镜像冻结模型实际层数、每层张量集合、主机文件偏移和量化字段。本轮新增：
+
+```text
+model_tools/model_layer_descriptor.py
+model_tools/model_layer_descriptor_reference.json
+model_tools/test_model_layer_descriptor.py
+```
+
+### 1. 纠正实际模型层数与硬件容量
+
+对 `model_output/yanbo_qwen25_0.5b_int4.p50` 的内嵌 JSON 和外部 `yanbo_qwen25_0.5b_int4.json` 完整交叉校验后确认：
+
+- 真实模型 `num_hidden_layers=24`，有效层号为 `0..23`；
+- 现有 F3/G2 KV 与控制地址契约容量为 28 层；
+- 因此阶段 H 调度必须执行 24 个真实层，不能把 layer24..27 当成模型层；
+- 28 仅表示硬件地址容量，当前有 4 个未使用层槽；
+- 模型元数据 `max_position_embeddings=32768`，当前硬件 KV Cache 上限为 16384，第一版完整推理必须显式受硬件上下文限制。
+
+### 2. 真实张量目录
+
+镜像总计 290 个张量：
+
+- 2 个全局张量；
+- 24 层 × 每层 12 个张量 = 288 个层内张量；
+- `model.embed_tokens.weight=[151936,896]` 同时作为 tied LM Head 权重；
+- `model.norm.weight=[896]` 为最终 RMSNorm 参数；
+- 每个 Transformer 层固定包含 input RMSNorm、Q/K/V weight+bias、O_proj、post RMSNorm、gate/up/down 共 12 项。
+
+量化契约：
+
+```text
+weight_bits = 4
+group_size = 64
+range = [-7, 7]
+packed_order = low_nibble_first
+scale_dtype = float16
+```
+
+### 3. 层模板与主机文件偏移
+
+24 层结构完全同构，可由“层模板 + 层基址”紧凑描述：
+
+```text
+first_layer_base_offset = 72,851,456 B
+layer_stride_bytes      = 7,958,528 B
+layer_payload_span      = 7,955,456 B
+layer_alignment_gap     = 3,072 B
+last_layer_base_offset  = 255,897,600 B
+```
+
+12 类张量的 shape、storage、data/scale 相对偏移、长度、padded columns 和 groups 已冻结。描述器可：
+
+- 展开任意 layer0..23 的 12 个张量和绝对主机文件偏移；
+- 展开全部 24 层供后续权重加载器或微码生成器消费；
+- 检查全局 Embedding/LM Head tie 和最终 RMSNorm；
+- 防止请求不存在的 layer24..27；
+- 检测模型目录、shape、偏移、量化或层步长变化。
+
+### 4. 自动验证结果
+
+新增 H1 测试把全部 24×12=288 个层内张量逐项与 P50 原目录比较，覆盖：
+
+- 张量完整名称；
+- shape 与 source dtype；
+- INT4/FP16 storage；
+- data offset/data length；
+- scale offset/scale length；
+- padded columns/groups per row；
+- 层基址、固定步长、有效跨度和对齐间隙；
+- tied Embedding/LM Head 与最终 RMSNorm；
+- 24 层实际数量、28 层硬件容量和 16384 上下文硬件限制。
+
+结果：
+
+```text
+H1 专项测试：9/9 PASS
+冻结描述表验证：24 层、288 个层内张量 PASS
+完整 model_tools 回归：196/196 PASS
+```
+
+### 5. 当前唯一下一任务
+
+H1 的模型目录与主机文件偏移已冻结。下一步必须基于真实 24 层描述表设计：
+
+1. 权重流式加载或按层重载事务；
+2. 判断哪些参数常驻 DDR3、哪些使用单层缓冲；
+3. 1 GiB DDR3 的参数缓冲、hidden 双缓冲、scratch、KV Cache 和 GEMV 输出分区；
+4. 明确每层切换时的上传顺序、覆盖安全性和验收规则。
+
+在上述内存与加载方案冻结前，不开始层间 scheduler/微码 RTL。
