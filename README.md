@@ -103,7 +103,7 @@ G2 完整 layer0 Transformer Block 已完成独立验收。`model_tools/transfor
 G2 完整 layer0 Block、H1 真实 24 层目录和 H2 1 GiB DDR3 方案均已冻结。H3 已建立真实 24 层
 slot A 顺序事务：456 笔参数上传、23 次 1792 B hidden copy；UART 新增配置读回 `L` 与安全 DDR copy `M`，
 G2 默认单层行为保持不变。真实 position0/count1 已连贯运行 layer0..23：layer0 的 18 张量与 G2
-逐位一致，每层输入等于上一层输出，最终 hidden SHA256=e9708deff485…619a；完整回归 243/243 PASS。
+逐位一致，每层输入等于上一层输出，最终 hidden SHA256=e9708deff485…619a；完整回归 244/244 PASS。
 H3 host 可用 `--check-reference` 逐层比对。独立顶层已通过 Compile/Synthesize/Device Map，映射资源
 29741 LUT / 35225 FF，但综合 setup WNS=-0.312 ns，尚未时序收敛。下一步完成 H3 PnR、位流、
 JTAG SRAM 和真实 layer0→23 逐层板级闭环；最终 RMSNorm、LM Head、logits 与文本生成仍未开始。

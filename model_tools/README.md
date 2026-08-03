@@ -253,7 +253,7 @@ python -m model_tools.full_model_24layer_reference verify
 python tools\pangu_full_model_h3_host.py dry-run
 ```
 
-冻结事务清单为 24 层、456 笔参数上传、191,066,112 B、23 次 1,792 B hidden copy。真实 24 层软件链最终 hidden SHA256=`e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a`，layer0 的 18 张量与 G2 逐位一致，完整回归 `243/243 PASS`。独立 H3 顶层已通过 Compile/Synthesize/Device Map，但综合 setup WNS=`-0.312 ns`，尚未完成 PnR、位流或板级执行；详见 `full_model_h3/README.md`。
+冻结事务清单为 24 层、456 笔参数上传、191,066,112 B、23 次 1,792 B hidden copy。真实 24 层软件链最终 hidden SHA256=`e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a`，layer0 的 18 张量与 G2 逐位一致，完整回归 `244/244 PASS`。独立 H3 顶层已通过 Compile/Synthesize/Device Map，但综合 setup WNS=`-0.312 ns`，尚未完成 PnR、位流或板级执行；详见 `full_model_h3/README.md`。
 
 按张量名提取任意一行：
 

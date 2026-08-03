@@ -13,6 +13,7 @@ from tools.pangu_full_model_h3_host import (
     build_parser,
     configure_layer,
     copy_region,
+    expected_reference_outputs,
     read_configuration,
     verify_configuration,
 )
@@ -138,13 +139,55 @@ class FullModelH3ProtocolTests(unittest.TestCase):
         self.assertEqual(single.layer, 23)
         self.assertTrue(single.copy_output)
         sequence = parser.parse_args(
-            [
-                "run-sequence", "--start-layer", "2", "--end-layer", "5",
-                "--check-reference",
-            ]
+            ["run-sequence", "--check-reference"]
         )
-        self.assertEqual((sequence.start_layer, sequence.end_layer), (2, 5))
+        self.assertEqual((sequence.start_layer, sequence.end_layer), (0, 23))
         self.assertTrue(sequence.check_reference)
+
+    def test_reference_check_only_accepts_frozen_full_sequence(self) -> None:
+        outputs = expected_reference_outputs(
+            enabled=True,
+            start_layer=0,
+            end_layer=23,
+            query_position=0,
+            window_start=0,
+            count=1,
+        )
+        self.assertIsNotNone(outputs)
+        self.assertEqual(len(outputs or []), 24)
+        self.assertIsNone(
+            expected_reference_outputs(
+                enabled=False,
+                start_layer=2,
+                end_layer=5,
+                query_position=7,
+                window_start=4,
+                count=4,
+            )
+        )
+        invalid = (
+            (1, 23, 0, 0, 1),
+            (0, 22, 0, 0, 1),
+            (0, 23, 1, 1, 1),
+            (0, 23, 0, 0, 2),
+        )
+        for start, end, query, window, count in invalid:
+            with self.subTest(
+                start=start,
+                end=end,
+                query=query,
+                window=window,
+                count=count,
+            ):
+                with self.assertRaises(ValueError):
+                    expected_reference_outputs(
+                        enabled=True,
+                        start_layer=start,
+                        end_layer=end,
+                        query_position=query,
+                        window_start=window,
+                        count=count,
+                    )
 
     def test_g2_defaults_stay_single_layer_and_copy_disabled(self) -> None:
         ctrl = (RTL / "transformer_block_ctrl.v").read_text(encoding="utf-8")

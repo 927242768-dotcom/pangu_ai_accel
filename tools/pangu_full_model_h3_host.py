@@ -195,6 +195,37 @@ def read_block_output_hash(
     return hashlib.sha256(payload).hexdigest()
 
 
+def expected_reference_outputs(
+    *,
+    enabled: bool,
+    start_layer: int,
+    end_layer: int,
+    query_position: int,
+    window_start: int,
+    count: int,
+) -> list[str] | None:
+    if not enabled:
+        return None
+    if (
+        int(start_layer),
+        int(end_layer),
+        int(query_position),
+        int(window_start),
+        int(count),
+    ) != (0, ACTIVE_LAYER_COUNT - 1, 0, 0, 1):
+        raise ValueError(
+            "--check-reference 只允许完整 layer0..23 且 "
+            "query/window/count=0/0/1"
+        )
+    outputs = [
+        str(value)
+        for value in load_24layer_reference()["layer_output_sha256"]
+    ]
+    if len(outputs) != ACTIVE_LAYER_COUNT:
+        raise RuntimeError("24 层软件 reference 输出数量异常")
+    return outputs
+
+
 def _check_idle_status(port: object, timeout: float) -> dict[str, object]:
     status = read_status(port, timeout)
     if not status["ddr_init_done"]:
@@ -488,22 +519,17 @@ def main(argv: Iterable[str] | None = None) -> int:
                     verify=args.verify_load,
                 )
 
-            expected_outputs = None
-            if args.check_reference:
-                if (
-                    args.start_layer,
-                    args.end_layer,
-                    args.query,
-                    args.window,
-                    args.count,
-                ) != (0, ACTIVE_LAYER_COUNT - 1, 0, 0, 1):
-                    raise SystemExit(
-                        "--check-reference 只允许完整 layer0..23 且 "
-                        "query/window/count=0/0/1"
-                    )
-                expected_outputs = load_24layer_reference()["layer_output_sha256"]
-                if len(expected_outputs) != ACTIVE_LAYER_COUNT:
-                    raise RuntimeError("24 层软件 reference 输出数量异常")
+            try:
+                expected_outputs = expected_reference_outputs(
+                    enabled=args.check_reference,
+                    start_layer=args.start_layer,
+                    end_layer=args.end_layer,
+                    query_position=args.query,
+                    window_start=args.window,
+                    count=args.count,
+                )
+            except ValueError as error:
+                raise SystemExit(str(error)) from error
 
             started = time.perf_counter()
             for layer in range(args.start_layer, args.end_layer + 1):

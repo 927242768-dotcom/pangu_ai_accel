@@ -27,7 +27,7 @@
 - `full_model_24layer_reference.py` 已用真实 layer0..23 参数连贯执行 position=0/count=1；layer0 的 18 个关键张量与已验收 G2 query0 逐位完全一致，每层输入严格等于上一层输出。
 - 冻结初始 hidden SHA256=`26139d5cacc3a2c2cf018016f370effd02e043b0d2155f89573463683fba80f0`，layer23 最终 hidden SHA256=`e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a`；24 层完整重算约 136 秒。
 - H3 host 已支持 `--check-reference`，未来板测将逐层回读 1,792 B output 并与软件 SHA256 比较。
-- 受影响专项 `37/37 PASS`，完整回归 `243/243 PASS`，24 层冻结清单显式重算 verify PASS。
+- 受影响专项 `38/38 PASS`，完整回归 `244/244 PASS`，24 层冻结清单显式重算 verify PASS。
 - `transformer_block_host_ctrl` 独立 PDS Compile/Synthesize 成功。
 - 独立顶层 `full_model_h3_top` 已通过 Compile、Synthesize 和 Device Map。
 

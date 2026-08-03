@@ -2779,8 +2779,8 @@ run-sequence --check-reference
 ### 6. 最终软件验收
 
 ```text
-受影响专项回归            37/37 PASS
-完整 model_tools 回归     243/243 PASS
+受影响专项回归            38/38 PASS
+完整 model_tools 回归     244/244 PASS
 G2 固定清单               4/4 PASS
 H3 参数/hidden 清单       PASS
 24 层完整重算 verify      24/24 PASS
