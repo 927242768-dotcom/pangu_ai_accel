@@ -777,7 +777,7 @@ H3.2 主机顺序执行、配置读回与 hidden copy 前端基线（2026-08-03�
 - [x] 独立 `full_model_h3_top` 已通过 PDS Compile、Synthesize、Device Map；映射资源 `29741 LUT / 35225 FF / 52 DRM / 36 APM / 79 IO`；综合慢角 100 MHz setup WNS=`-0.312 ns`、TNS=`-79.872 ns`，因此当前仅是前端通过，不代表时序、位流或板卡验收；
 - [x] 真实 layer0..23 完整软件 Block 金标准已建立：position=0/count=1 从同一初始 hidden 连贯运行 24 层，每层输入严格等于上一层输出；layer0 的 18 个关键张量与已验收 G2 query0 逐位完全一致；
 - [x] 冻结 `full_model_24layer_reference.json`：初始 hidden SHA256=`26139d5cacc3a2c2cf018016f370effd02e043b0d2155f89573463683fba80f0`，layer23 最终 hidden SHA256=`e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a`；每层记录 output、18 张量集合摘要和对应 H3 参数事务摘要；
-- [x] H3 host 新增 `--check-reference`，完整顺序板测时强制每层回读 1,792 B output 并与冻结 SHA256 比较，第一处偏差立即停止；专项 38/38 PASS，完整 `model_tools` 回归 `244/244 PASS`，24 层显式重算 verify PASS；
+- [x] H3 host 新增 `--check-reference`，只允许完整 layer0..23、query/window/count=`0/0/1` 的冻结条件；板测时强制每层回读 1,792 B output 并与冻结 SHA256 比较，第一处偏差立即停止；直接受影响测试 `46/46 PASS`，完整 `model_tools` 回归 `244/244 PASS`，24 层显式重算 verify PASS；
 - [ ] 当前仍缺 H3 PnR/正式多角时序/JTAG SRAM、`L/M` 命令真实板测，以及 layer0→23 连续 FPGA 逐层 SHA 比较；因此“层间状态机/微码调度器”“hidden 双缓冲”和“从第 0 层运行到最后一层”仍不得勾选。
 
 当前唯一实施点：修复 H3 综合慢角 setup WNS=`-0.312 ns`、TNS=`-79.872 ns`，完成完整 PnR、全部多角时序、位流 SHA256 和仅 JTAG SRAM 下载；随后运行 `--check-reference`，逐层验证 cfg_layer、KV 层号、Block 状态、hidden copy 和 layer0..23 output SHA256。slot B 预取与无复制地址 ping-pong 留到该正确性基线通过后启用。

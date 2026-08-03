@@ -2774,12 +2774,12 @@ layer23 first_residual
 run-sequence --check-reference
 ```
 
-启用后每层执行完成都会回读 1,792 B `block_output_q10`，与冻结的对应 layer output SHA256 比较；第一处不一致立即停止并报告层号、实际值和期望值，不再只检查最终 layer23。
+启用后只接受完整 layer0..23、query/window/count=`0/0/1` 的冻结条件；每层执行完成都会回读 1,792 B `block_output_q10`，与冻结的对应 layer output SHA256 比较；第一处不一致立即停止并报告层号、实际值和期望值，不再只检查最终 layer23。
 
 ### 6. 最终软件验收
 
 ```text
-受影响专项回归            38/38 PASS
+直接受影响测试            46/46 PASS
 完整 model_tools 回归     244/244 PASS
 G2 固定清单               4/4 PASS
 H3 参数/hidden 清单       PASS
