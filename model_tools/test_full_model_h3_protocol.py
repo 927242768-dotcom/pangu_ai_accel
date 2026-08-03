@@ -138,9 +138,13 @@ class FullModelH3ProtocolTests(unittest.TestCase):
         self.assertEqual(single.layer, 23)
         self.assertTrue(single.copy_output)
         sequence = parser.parse_args(
-            ["run-sequence", "--start-layer", "2", "--end-layer", "5"]
+            [
+                "run-sequence", "--start-layer", "2", "--end-layer", "5",
+                "--check-reference",
+            ]
         )
         self.assertEqual((sequence.start_layer, sequence.end_layer), (2, 5))
+        self.assertTrue(sequence.check_reference)
 
     def test_g2_defaults_stay_single_layer_and_copy_disabled(self) -> None:
         ctrl = (RTL / "transformer_block_ctrl.v").read_text(encoding="utf-8")

@@ -97,6 +97,7 @@ class MLPDownProjReferenceError(ValueError):
 class DownProjectionModel:
     weights: np.ndarray
     weight_scales: np.ndarray
+    weight_name: str = DEFAULT_WEIGHT
 
 
 @dataclass(frozen=True)
@@ -141,19 +142,27 @@ def q28_to_float32(values: np.ndarray | Sequence[int]) -> np.ndarray:
     return result
 
 
-def load_down_projection_model(image: P50Image) -> DownProjectionModel:
+def load_down_projection_model(
+    image: P50Image,
+    weight_name: str = DEFAULT_WEIGHT,
+) -> DownProjectionModel:
     names = set(image.tensor_names())
-    bias_name = "model.layers.0.mlp.down_proj.bias"
+    prefix = weight_name.removesuffix("weight")
+    bias_name = f"{prefix}bias"
     if bias_name in names:
         raise MLPDownProjReferenceError(f"当前参考要求无 bias，但镜像中存在 {bias_name}")
-    block = image.extract_block(DEFAULT_WEIGHT, 0, M, 0, K)
+    block = image.extract_block(weight_name, 0, M, 0, K)
     if block.quantized is None or block.scales is None:
-        raise MLPDownProjReferenceError(f"{DEFAULT_WEIGHT} 不是分组 INT4 张量")
+        raise MLPDownProjReferenceError(f"{weight_name} 不是分组 INT4 张量")
     weights = block.quantized.astype(np.int8)
     scales = block.scales.astype(np.float32)
     _require_shape(weights, (M, K), "down_proj weights")
     _require_shape(scales, (M, GROUPS), "down_proj scales")
-    return DownProjectionModel(weights=weights, weight_scales=scales)
+    return DownProjectionModel(
+        weights=weights,
+        weight_scales=scales,
+        weight_name=weight_name,
+    )
 
 
 def compute_q28_reference(
@@ -208,7 +217,7 @@ def case_from_source_q28(
         activation_values=input_float,
         bias=None,
         group_size=GROUP_SIZE,
-        weight_name=DEFAULT_WEIGHT,
+        weight_name=model.weight_name,
         bias_name=None,
     )
     independent = compute_q28_reference(

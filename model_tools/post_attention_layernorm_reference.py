@@ -144,6 +144,7 @@ def case_from_input_q10(
     query_position: int | None = None,
     count: int | None = None,
     epsilon: float = DEFAULT_EPSILON,
+    gamma_name: str = DEFAULT_GAMMA,
 ) -> PostAttentionLayerNormCase:
     """从精确 signed Q6.10 输入构造硬件等价 RMSNorm 用例。"""
 
@@ -160,7 +161,7 @@ def case_from_input_q10(
         activation_values=input_float,
         gamma_values=gamma,
         epsilon=epsilon,
-        gamma_name=DEFAULT_GAMMA,
+        gamma_name=gamma_name,
     )
     if not np.array_equal(result.activation.quantized, resolved_input):
         raise PostAttentionLayerNormError("Q6.10 输入经软件参考后未逐位还原")

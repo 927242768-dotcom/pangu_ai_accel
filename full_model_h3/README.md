@@ -16,7 +16,7 @@
 
 ## 2. 当前状态
 
-截至 2026-08-03，已完成 **H3 参数/事务软件契约、UART 协议、独立顶层和 PDS 前端映射**，但尚未完成 H3 PnR、时序、位流或真实板卡顺序执行：
+截至 2026-08-03，已完成 **H3 参数/事务契约、真实 24 层软件金标准、UART 协议、独立顶层和 PDS 前端映射**，但尚未完成 H3 PnR、时序、位流或真实板卡顺序执行：
 
 - `build_layer_parameter_uploads(layer_index)` 可为真实 layer0..23 生成 19 笔 slot A 参数事务，每层 7,961,088 B；layer0 全部内容与 G2 已板测 resident 参数逐字节一致。
 - `full_model_layer_sequence.py` 冻结 24 层顺序清单：456 笔参数上传、191,066,112 B，总计 23 次 `block_output_q10 -> block_hidden_q10` copy，每次 1,792 B/56 beats。
@@ -24,13 +24,15 @@
 - H3 顶层显式设置真实层数 24、启用 DDR copy，并返回固件标识 `PANGU50K H3 LAYER V1`。
 - 新增 `L` 命令读回当前 `layer/query/window/count`；新增 `M` 命令执行 DDR3 内部 32 B beat copy，包含地址范围、对齐、长度和非重叠检查。
 - H3 上位机按 `C -> L校验 -> 19笔W -> P -> G -> 可选M` 顺序运行；可执行单层或指定层范围 dry-run/板测。
-- H3 专项软件/静态协议测试当前 `28/28 PASS`；连同 G2 集成检查为 `42/42 PASS`，完整回归 `234/234 PASS`。
+- `full_model_24layer_reference.py` 已用真实 layer0..23 参数连贯执行 position=0/count=1；layer0 的 18 个关键张量与已验收 G2 query0 逐位完全一致，每层输入严格等于上一层输出。
+- 冻结初始 hidden SHA256=`26139d5cacc3a2c2cf018016f370effd02e043b0d2155f89573463683fba80f0`，layer23 最终 hidden SHA256=`e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a`；24 层完整重算约 136 秒。
+- H3 host 已支持 `--check-reference`，未来板测将逐层回读 1,792 B output 并与软件 SHA256 比较。
+- 受影响专项 `37/37 PASS`，完整回归 `243/243 PASS`，24 层冻结清单显式重算 verify PASS。
 - `transformer_block_host_ctrl` 独立 PDS Compile/Synthesize 成功。
 - 独立顶层 `full_model_h3_top` 已通过 Compile、Synthesize 和 Device Map。
 
 当前没有以下证据，因此不得把“层间状态机/微码调度器”或“从第 0 层运行到最后一层”勾选为完成：
 
-- 任意 layer1..23 的完整软件 Block 金标准与逐张量比较；
 - H3 完整 Place & Route、多角时序和未布线网络 0；
 - H3 位流 SHA256 和 JTAG SRAM；
 - `L/M` 命令真实板卡闭环；
@@ -47,6 +49,9 @@ model_tools/full_model_layer_sequence.py
 model_tools/full_model_layer_sequence_reference.json
 model_tools/test_full_model_layer_sequence.py
 model_tools/test_full_model_h3_protocol.py
+model_tools/full_model_24layer_reference.py
+model_tools/full_model_24layer_reference.json
+model_tools/test_full_model_24layer_reference.py
 tools/pangu_full_model_h3_host.py
 ```
 
@@ -70,6 +75,7 @@ tools/pangu_full_model_h3_host.py
 
 ```bat
 python -m model_tools.full_model_layer_sequence verify
+python -m model_tools.full_model_24layer_reference verify
 python -m unittest model_tools.test_full_model_layer_uploads ^
   model_tools.test_full_model_layer_sequence ^
   model_tools.test_full_model_h3_protocol ^
@@ -116,7 +122,7 @@ python tools\pangu_full_model_h3_host.py --port COM20 copy-hidden
 python tools\pangu_full_model_h3_host.py --port COM20 run-layer 0 --read-output
 python tools\pangu_full_model_h3_host.py --port COM20 run-sequence ^
   --start-layer 0 --end-layer 23 --query 0 --window 0 --count 1 ^
-  --load-tables --prepare-query0
+  --load-tables --prepare-query0 --check-reference
 ```
 
 115200 UART 每层参数换入约 691 秒，24 层每 token 约 4.61 小时，只适合正确性验证。
@@ -147,6 +153,6 @@ D:\Pango\PDS_2022.2-SP6.4\bin\pds_shell.exe ^
 
 ## 7. 当前唯一下一任务
 
-先建立真实 layer0..23 的完整软件 Block 金标准，使每层 Attention/MLP 参数都来自对应 P50 层，并冻结至少一个单 token 的 24 层逐层输出 SHA256。随后修复 H3 综合 setup 违例，完成完整 PnR、多角时序、位流、JTAG SRAM，以及 `L/M` 和 layer0→23 顺序板级闭环。
+修复 H3 综合 setup WNS=`-0.312 ns`、TNS=`-79.872 ns`，完成完整 PnR、多角时序、未布线网络 0、位流 SHA256 和仅 JTAG SRAM 下载；随后使用 `--check-reference` 验证 `L/M`、cfg_layer、KV 层号、hidden copy 和 layer0→23 每层 output SHA256。
 
 在这些证据全部通过前，不进入最终 RMSNorm、LM Head、logits 或文本生成。

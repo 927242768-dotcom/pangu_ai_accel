@@ -76,10 +76,11 @@ class AttentionOProjReferenceError(ValueError):
 
 @dataclass(frozen=True)
 class AttentionOProjModel:
-    """真实 layer0 O_proj 的 INT4 权重与 FP16 group scale。"""
+    """一个真实 O_proj 的 INT4 权重、FP16 group scale 与张量名。"""
 
     weights: np.ndarray
     weight_scales: np.ndarray
+    weight_name: str = DEFAULT_WEIGHT
 
 
 @dataclass(frozen=True)
@@ -123,17 +124,24 @@ def attention_q28_to_float32(values: np.ndarray | Sequence[int]) -> np.ndarray:
     return result
 
 
-def load_oproj_model(image: P50Image) -> AttentionOProjModel:
-    """从真实 P50 镜像读取完整 layer0 O_proj。"""
+def load_oproj_model(
+    image: P50Image,
+    weight_name: str = DEFAULT_WEIGHT,
+) -> AttentionOProjModel:
+    """从真实 P50 镜像读取一个完整 O_proj；默认保持 layer0。"""
 
-    block = image.extract_block(DEFAULT_WEIGHT, 0, M, 0, K)
+    block = image.extract_block(weight_name, 0, M, 0, K)
     if block.quantized is None or block.scales is None:
         raise AttentionOProjReferenceError("O_proj 权重不是分组 INT4 张量")
     weights = block.quantized.astype(np.int8)
     scales = block.scales.astype(np.float32)
     _require_shape(weights, (M, K), "O_proj weights")
     _require_shape(scales, (M, GROUPS), "O_proj scales")
-    return AttentionOProjModel(weights=weights, weight_scales=scales)
+    return AttentionOProjModel(
+        weights=weights,
+        weight_scales=scales,
+        weight_name=weight_name,
+    )
 
 
 def compute_q28_reference(
@@ -203,7 +211,7 @@ def case_from_attention_q28(
         activation_values=activation_float,
         bias=None,
         group_size=GROUP_SIZE,
-        weight_name=DEFAULT_WEIGHT,
+        weight_name=model.weight_name,
         bias_name=None,
     )
     if result.combined_scale_saturated_count:

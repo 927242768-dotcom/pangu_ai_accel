@@ -26,6 +26,7 @@ MODEL_TOOLS = PROJECT_ROOT / "model_tools"
 if str(MODEL_TOOLS) not in sys.path:
     sys.path.insert(0, str(MODEL_TOOLS))
 
+from full_model_24layer_reference import load_reference as load_24layer_reference  # noqa: E402
 from full_model_layer_sequence import (  # noqa: E402
     ACTIVE_LAYER_COUNT,
     build_common_runtime_uploads,
@@ -216,6 +217,7 @@ def run_layer(
     verify_load: bool,
     copy_output: bool,
     read_output: bool,
+    expected_output_sha256: str | None = None,
 ) -> dict[str, object]:
     # C 会清除本轮 any_write/commit 标志，因此必须先配置，再上传参数。
     configure_layer(
@@ -247,9 +249,14 @@ def run_layer(
     execution = execute_block(port, timeout)
     output_sha256 = (
         read_block_output_hash(port, baud=baud, timeout=timeout)
-        if read_output
+        if read_output or expected_output_sha256 is not None
         else None
     )
+    if expected_output_sha256 is not None and output_sha256 != expected_output_sha256:
+        raise AssertionError(
+            f"layer{layer} 输出 SHA256 不一致："
+            f"actual={output_sha256}, expected={expected_output_sha256}"
+        )
 
     copy_seconds = 0.0
     if copy_output:
@@ -330,6 +337,11 @@ def build_parser() -> argparse.ArgumentParser:
     sequence.add_argument("--prepare-query0", action="store_true")
     sequence.add_argument("--verify-load", action="store_true")
     sequence.add_argument("--read-each-output", action="store_true")
+    sequence.add_argument(
+        "--check-reference",
+        action="store_true",
+        help="逐层回读 output 并与真实 24 层冻结 SHA256 比较",
+    )
     return parser
 
 
@@ -443,6 +455,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 verify_load=args.verify_load,
                 copy_output=args.copy_output,
                 read_output=args.read_output,
+                expected_output_sha256=None,
             )
             return 0
 
@@ -475,6 +488,23 @@ def main(argv: Iterable[str] | None = None) -> int:
                     verify=args.verify_load,
                 )
 
+            expected_outputs = None
+            if args.check_reference:
+                if (
+                    args.start_layer,
+                    args.end_layer,
+                    args.query,
+                    args.window,
+                    args.count,
+                ) != (0, ACTIVE_LAYER_COUNT - 1, 0, 0, 1):
+                    raise SystemExit(
+                        "--check-reference 只允许完整 layer0..23 且 "
+                        "query/window/count=0/0/1"
+                    )
+                expected_outputs = load_24layer_reference()["layer_output_sha256"]
+                if len(expected_outputs) != ACTIVE_LAYER_COUNT:
+                    raise RuntimeError("24 层软件 reference 输出数量异常")
+
             started = time.perf_counter()
             for layer in range(args.start_layer, args.end_layer + 1):
                 run_layer(
@@ -488,7 +518,16 @@ def main(argv: Iterable[str] | None = None) -> int:
                     timeout=args.timeout,
                     verify_load=args.verify_load,
                     copy_output=layer != args.end_layer,
-                    read_output=args.read_each_output or layer == args.end_layer,
+                    read_output=(
+                        args.read_each_output
+                        or args.check_reference
+                        or layer == args.end_layer
+                    ),
+                    expected_output_sha256=(
+                        str(expected_outputs[layer])
+                        if expected_outputs is not None
+                        else None
+                    ),
                 )
             print(
                 f"H3 SEQUENCE PASS: layers={args.start_layer}..{args.end_layer}, "

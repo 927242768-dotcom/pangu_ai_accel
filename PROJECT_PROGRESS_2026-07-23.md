@@ -2637,8 +2637,167 @@ hold/recovery/removal/min-pulse 无违例
 
 因此当前只允许宣称前端集成成功；尚未完成 PnR、正式多角时序、未布线网络 0、Bitstream 或 JTAG SRAM。
 
-### 7. 当前唯一下一任务
+### 7. 当时的唯一下一任务（后续已由第四十七节完成）
 
 建立真实 layer0..23 的完整软件 Block 金标准，使 Attention、O_proj、post RMS、gate/up、down 的参数都来自对应 P50 层，并冻结至少一个单 token 的 24 层逐层 hidden SHA256。之后修复 H3 setup 违例，完成 PnR、多角时序、位流、JTAG SRAM、`L/M` 命令和 layer0→23 顺序板级闭环。
+
+上述全部通过前，“层间状态机/微码调度器”“hidden 双缓冲”“从第 0 层运行到最后一层”继续保持未勾选，也不得进入最终 RMSNorm、LM Head、logits 或文本生成。
+
+
+## 四十七、H3.3 真实 24 层单 token 软件金标准完成（2026-08-03）
+
+本轮完成第四十六节此前唯一的软件任务：把完整 Block 参考从固定 layer0 扩展到真实 P50 的 layer0..23，并从同一初始 hidden 连贯运行 24 层。该结论只适用于软件金标准；H3 硬件仍未完成时序、位流或板级连续执行。
+
+### 1. layer-specific 参数加载
+
+新增：
+
+```text
+model_tools/full_model_24layer_reference.py
+model_tools/full_model_24layer_reference.json
+model_tools/test_full_model_24layer_reference.py
+```
+
+软件参考为每层读取对应真实张量：
+
+```text
+model.layers.N.input_layernorm.weight
+model.layers.N.self_attn.q_proj.weight/bias
+model.layers.N.self_attn.k_proj.weight/bias
+model.layers.N.self_attn.v_proj.weight/bias
+model.layers.N.self_attn.o_proj.weight
+model.layers.N.post_attention_layernorm.weight
+model.layers.N.mlp.gate_proj.weight
+model.layers.N.mlp.up_proj.weight
+model.layers.N.mlp.down_proj.weight
+```
+
+O_proj、down_proj 和 post RMS 的既有加载/计算入口增加可选张量名；默认值仍是 layer0，因此所有历史固定清单和独立算子默认行为不变。
+
+### 2. 显式 hidden 输入的完整 Block
+
+新增 `build_single_token_layer_case()`，不再按 seed 隐式生成每层输入，而是显式接收上一层 `[896]` signed int16 Q6.10 output。position=0/count=1 时每层执行：
+
+```text
+input RMSNorm
+→ Q/K/V
+→ RoPE
+→ 当前 token K/V 自注意力
+→ Attention Score
+→ Softmax
+→ probability × V
+→ O_proj
+→ 第一处残差
+→ post RMSNorm
+→ gate/up
+→ SiLU
+→ SiLU × up
+→ down_proj
+→ 第二处残差
+```
+
+全部算术直接复用 G2 已验证的定点函数。layer0 新路径与 G2 query0 的 18 个中间/最终张量逐位完全一致：
+
+```text
+initial hidden SHA256 = 26139d5cacc3a2c2cf018016f370effd02e043b0d2155f89573463683fba80f0
+layer0 output SHA256  = 630952eaf6fe179639773f2b60d1e9e990f380b0e698fa3d493dd7c279c96104
+18/18 tensor hashes   = identical to verified G2
+```
+
+### 3. 24 层连贯输出链
+
+24 层完整重算约 136 秒。每层输入 SHA256 严格等于上一层 output SHA256，输出前缀如下：
+
+```text
+layer00 630952eaf6fe
+layer01 884aa9a403d6
+layer02 d240831eddeb
+layer03 8206bf7570ab
+layer04 e3c234c93fbb
+layer05 39a5cbad1add
+layer06 1f8a5feb8e7e
+layer07 5652a8f86f25
+layer08 5a6c7363ec2d
+layer09 0a4a28829db0
+layer10 02b1cfa7b705
+layer11 267074df9a6d
+layer12 3e996f7e8f2f
+layer13 94aa56a4430c
+layer14 0bf5249c4cd3
+layer15 4ff777ffffba
+layer16 0c1ce328a3a2
+layer17 514990004b30
+layer18 bd77cd7ed77d
+layer19 40a59dac26df
+layer20 c08206336f24
+layer21 44b2587a25bf
+layer22 bc761532e370
+layer23 e9708deff485
+```
+
+最终 layer23 hidden：
+
+```text
+SHA256 = e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a
+```
+
+冻结清单对每层保存：
+
+- output Q6.10 SHA256；
+- 固定 18 个中间/最终张量的集合 SHA256；
+- H3 19 笔参数事务集合 SHA256；
+- 非零饱和事件。
+
+因此软件计算使用的 layer 参数与主机实际换入的 layer 参数有同一摘要链可核对。
+
+### 4. 饱和事件
+
+position0/count1 的 24 层链只有以下非零事件，每项均为 1 个元素：
+
+```text
+layer17 second_residual
+layer18 first_residual
+layer20 first_residual
+layer21 first_residual
+layer21 second_residual
+layer22 second_residual
+layer23 first_residual
+```
+
+其他层和其他饱和阶段均为 0。
+
+### 5. H3 板测逐层比较入口
+
+`tools/pangu_full_model_h3_host.py` 新增：
+
+```text
+run-sequence --check-reference
+```
+
+启用后每层执行完成都会回读 1,792 B `block_output_q10`，与冻结的对应 layer output SHA256 比较；第一处不一致立即停止并报告层号、实际值和期望值，不再只检查最终 layer23。
+
+### 6. 最终软件验收
+
+```text
+受影响专项回归            37/37 PASS
+完整 model_tools 回归     243/243 PASS
+G2 固定清单               4/4 PASS
+H3 参数/hidden 清单       PASS
+24 层完整重算 verify      24/24 PASS
+Python compileall         PASS
+git diff --check          PASS
+```
+
+### 7. 当前唯一下一任务
+
+软件侧真实 24 层基线已完成。下一步只允许处理 H3 硬件闭环：
+
+1. 修复综合慢角 setup WNS=`-0.312 ns`、TNS=`-79.872 ns`；
+2. 完成完整 Place & Route，最终未布线网络为 0；
+3. 通过 slow/fast setup、hold、recovery、removal 和 minimum-pulse；
+4. 生成位流并记录 SHA256；
+5. 仅通过 JTAG 下载 FPGA SRAM，不操作 Flash；
+6. 验证 `L` 配置读回与 `M` hidden copy；
+7. 使用 `--check-reference` 连续运行 layer0..23，逐层比较 output SHA256 和状态。
 
 上述全部通过前，“层间状态机/微码调度器”“hidden 双缓冲”“从第 0 层运行到最后一层”继续保持未勾选，也不得进入最终 RMSNorm、LM Head、logits 或文本生成。

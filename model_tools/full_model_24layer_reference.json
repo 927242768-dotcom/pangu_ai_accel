@@ -1,0 +1,142 @@
+{
+  "schema": "pangu50k.full_model_24layer_reference.v1",
+  "definition": {
+    "model": "Qwen2.5-0.5B real P50 Transformer layers",
+    "layers": 24,
+    "layer_range": [
+      0,
+      23
+    ],
+    "position": 0,
+    "count": 1,
+    "input_format": "signed int16 Q6.10 [896]",
+    "output_format": "signed int16 Q6.10 [896]",
+    "initial_hidden_seed": 20260806,
+    "parameter_contract": "pangu50k.full_model_layer_sequence.v1",
+    "excluded": [
+      "embedding",
+      "final_rmsnorm",
+      "lm_head",
+      "logits",
+      "sampling"
+    ]
+  },
+  "initial_hidden_sha256": "26139d5cacc3a2c2cf018016f370effd02e043b0d2155f89573463683fba80f0",
+  "final_hidden_sha256": "e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a",
+  "layer_output_sha256": [
+    "630952eaf6fe179639773f2b60d1e9e990f380b0e698fa3d493dd7c279c96104",
+    "884aa9a403d6ae98c5c86c22f9bfdaa37f75441c130745a83fb3c83090e1f8c9",
+    "d240831eddebe333f7a8339ec5afb4b670b5c2792981a67490b84ac72c644578",
+    "8206bf7570abc02ef7a41e29849d7b2e40de7e69d084ecf858e240a12a9d4142",
+    "e3c234c93fbbea78d8a17c19ff3bc9c1bb574a48a4af3c85b58d27771638f186",
+    "39a5cbad1addf24015d1246fe264cdf480ea9bb915cd8a9d44851b43b26e0aeb",
+    "1f8a5feb8e7e96acfdfdb4a9d187ffc78f474329e8442c8de8ce5e1aa134aecb",
+    "5652a8f86f25e1a73bc2e3ede0a4d2a4bdbe1c8ebb6d4ea443b03644df323c87",
+    "5a6c7363ec2d47e0edaffdf1748d4c985a7caec8429a469e30d204c61f146305",
+    "0a4a28829db06fbb0cc766dc94f55b8bebef63885b2a288f11ad7c13ad544e80",
+    "02b1cfa7b705274b42c50e2ee2286da399cd3ae29b80d643a040e37f4cbeb831",
+    "267074df9a6d4230c6824300706fe0428331f10a8c7b0583838ac86644996916",
+    "3e996f7e8f2f13ba33bb66cdea7f35880ba11b1bdd33a10623d5fd27897cc104",
+    "94aa56a4430c42dcde39ac4423ddf64cfb434cba241df2f99dbef1172c86c045",
+    "0bf5249c4cd38105e8df269913a6d2a6fe1106f6dafa1ccab3d9866fbe50de46",
+    "4ff777ffffba2f800159a77c8231033080f811a7382a5f03e745648b50a7bbef",
+    "0c1ce328a3a2ce1313b65b0c5b13f56421851d43d001851bdba05cacd62afca6",
+    "514990004b3082fc2d0e46f6f82a35ee9add8b73228a7e9cead54e8d00d7a86d",
+    "bd77cd7ed77d6dc99a2d7492fe022d83f414a620b220d8d3ab94cc4cdc34584c",
+    "40a59dac26df760918e83bc23a16253143a973eb96d1c39ad91f442388b4e711",
+    "c08206336f245284c811d3077c29659ba894a331b0aa49d65130e1b60eb87d1d",
+    "44b2587a25bfe294e5b5b1abb95a3b7f73cddeb774c32aae32f05a5c4ea67389",
+    "bc761532e370f257217c8c4e341cd297e88a1047ecb36ea666b1a9d532530d74",
+    "e9708deff4856b400fb953575288fdceab6bfef6a895f15739ac18b488f5619a"
+  ],
+  "layer_tensor_count": 18,
+  "layer_tensor_set_sha256": [
+    "fa87996b0c07558a5f8504645b5351223473ad87e3a9c6d89632d029301aa913",
+    "e323ca61e8bda672ed1ce602d2e97399930699779a5315fdf2147206b5edfe1b",
+    "f26eeae889b55759733645a9c7936d25fabd91615712e749ef0a9047b23c0ab1",
+    "83fc620b6ac723bda6b2c630031bc9eebd30cabc7d3577f31a45142c8c282b8d",
+    "d78d51098da83387f5b4cc185028d6b2025201eb91a7cd8996a4b0898330821b",
+    "a52085a7d10a662ac2d3ad17afbc41f78aaacbc8501c09d12978e6959c0a588d",
+    "2216c885301d9dbd619ba536b53778107121ba78b4406d8b924ca8168f9e2c18",
+    "53e86312db420811a7afce3de46abbc9f6966969dc1eeb26b3b0f959ec5912fb",
+    "2bc4bc9c6a71f89736d7e7ff89cd5686d06d38ccdbcc6277b2846d99f02a584b",
+    "e415f31596d8327faee39b9952094f94fab37746e25fdd4324d87db8dbad52d3",
+    "bf3fa57830c15d2536cb77e7131fffbd975faaf5944037e5169271d797549299",
+    "ebf8b98ad976e05286494c3c0262c8d6c980fe1139f141f6e3b4698e3c9466a7",
+    "e82c789a463b4e55587ab6fbf406e99c107ef1ffcb340aae2e2ee209fad3d6ee",
+    "20ac22e2eb854d76896c374c9ee0d05017682c091acd68471ae858ead37481b9",
+    "6e02d90caef05f3af3c05447a5e976b6da9e4cc454aadaf23937a883190ee3c6",
+    "05dc4666261a566fb7e886d069e330de94723aa8a50b11c313949b69da25f726",
+    "909958e12e9cc23c0e6c55bbc8abae22569dbb879e662630041628621df61fc9",
+    "61611de122fa2abc3e45815359ecb30c66a6accace6e7a4014251a3b1ef64c9a",
+    "fc04104beebdb8628ad15520ffda976999bd342bc814a7de5ef02ffd0725eb7d",
+    "8f2a9390365fe25c528988315ed7067c9234d2e4ec6e1188fa56af0fbce6b0ee",
+    "3f49641952eb93217cbd1256625ae30874db103efb2d8b22436309402eeb11ea",
+    "00d0cd8bf995f47faf533c6d7b7e998b8ef49010e57283d71aa3dfe6396ec8fc",
+    "fc49c7e307c45c41613d1c922373f75594c15d7aaacdf76ea68a0240c2f999fa",
+    "b896b27a03364af97d893ce9b91778108155fbc68b6c39c1f755796cf2ac5e45"
+  ],
+  "layer_parameter_upload_set_sha256": [
+    "c4194d5e2f76a85451cdc54130b06d5e58df6ef629e11589de261d1163f8c061",
+    "c48e73fd7f306a0c954a8e5003fd091a14b9fe22561589cdfeb3ef55122bea30",
+    "09cd368a89419803a47e49ada28d7dfadf57fe14d04a2af584bd2d0613998e71",
+    "7437fde0f5368a3f095b97b80a4a7cfebd33391150e04d878736778ba176b126",
+    "bc88f28f2a24c33fd49e64029c476bdee7b189fa10d193bc142f68b7ecdb2e27",
+    "19df0630b3bda309b5e9b92fcb353b98dedd48e93d5ecd1cf58a636a1a7f3663",
+    "2e340fffb8e22cf2a1d0c474d964643cf5e2239c0a07b4cfbe9af4836f5ea292",
+    "41da9bfa0aae591785a8ac8a425322e2fe3e62b60cffbe813398671e885a4624",
+    "e342e2cf33f1084ef250bbdda426595f47f77b539f07e2f480ec82bb59d2484a",
+    "aae3de466f26d40d192f127adf979638d891a5d1014e032fd34d560f9c4edb30",
+    "a3e86d5693dac85a0a6fceb909305ac712af94b0b275203d05584d304fe69839",
+    "25d353d0fcc8bea50dbfca20e4a45bb10dacf77c99bb78ab1bce60a4dc9dfd57",
+    "b5e4fcb7af81de0a9d2abed5aa0a42426e2579a52fbf7ef90b0908ef0772bd55",
+    "1b0f59740149c6e0c20a8df6d16f14311eb95f0d671fa62f1f821fb411664a2c",
+    "b76ea5976ccfebb46d96b152dbbcc1c4cd40859f1a780ba44a54c5763dd88b15",
+    "24b01ee037ad61ebd86a2d36ce4d26324e4649a625d19ce62cd79dc53bb06241",
+    "e9f885ea90561cacdb82f6e1b2a2e525f316b06c380bf4508418169a8ffbc4a8",
+    "d410e82c0a46f0c2946b6fd8b9ff3ce033ce6c46b8979d14709e56e4db5a7c07",
+    "e932faa9e1da9c9d4695f43d659c43ccad2560bea153706a850a68321c8a5a4d",
+    "6453dcfd9eb06199daddfcd9c5c831aaf3e048ad5751fc7406669600ec64c680",
+    "810d0425c2f76b094a25d5baa3c8c8458d9b8afa5d01982bd34f9867fe06b87b",
+    "03bff837a543ccd9f97db6ff517e5499960acda4145ed26eaff1c3549c21bd32",
+    "49f5f31f7d563e85aaed2460ec9c2b2cc18fedee11a0ebe7d554373c1768faac",
+    "73618e7a7f50c30ecdab456675b74fca7d039c46d40cfb24c64e7d1410e44df1"
+  ],
+  "saturation_events": [
+    {
+      "layer_index": 17,
+      "stage": "second_residual",
+      "count": 1
+    },
+    {
+      "layer_index": 18,
+      "stage": "first_residual",
+      "count": 1
+    },
+    {
+      "layer_index": 20,
+      "stage": "first_residual",
+      "count": 1
+    },
+    {
+      "layer_index": 21,
+      "stage": "first_residual",
+      "count": 1
+    },
+    {
+      "layer_index": 21,
+      "stage": "second_residual",
+      "count": 1
+    },
+    {
+      "layer_index": 22,
+      "stage": "second_residual",
+      "count": 1
+    },
+    {
+      "layer_index": 23,
+      "stage": "first_residual",
+      "count": 1
+    }
+  ]
+}
