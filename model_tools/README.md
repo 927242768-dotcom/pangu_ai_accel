@@ -109,6 +109,11 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `full_model_memory_plan.py` | H2 1 GiB DDR3 分区、24 层参数换入、tied 全局参数常驻、hidden 交接和传输时间规划器 |
 | `full_model_memory_plan_reference.json` | 完整 H2 计划规范化 SHA256 与关键分区边界冻结摘要 |
 | `test_full_model_memory_plan.py` | 验证 1 GiB 连续覆盖、G2 地址兼容、19 笔层事务、24 层 KV、A/B 槽和 UART 限制 |
+| `test_full_model_layer_uploads.py` | H3.1 验证 24 层真实参数载荷、layer0 旧数据等价、非零层 KV/config 和 host CLI |
+| `full_model_layer_sequence.py` | H3.2 冻结 24 层顺序上传、逐层配置/执行和 1,792 B hidden copy 契约 |
+| `full_model_layer_sequence_reference.json` | 456 笔层参数上传、23 次 hidden copy 和各层事务集合 SHA256 |
+| `test_full_model_layer_sequence.py` | 验证 24 层顺序、共享查表、layer0 G2 等价、copy 边界和 slot A 限制 |
+| `test_full_model_h3_protocol.py` | 验证 UART C/L/M 帧、配置读回、copy 拒绝条件、G2 默认参数和 H3 顶层 |
 | `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
 | `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
@@ -227,6 +232,24 @@ H2 冻结方案：
 - `0x3CE41000..0x3FFFFFFF`：约 49.75 MiB 高端保留区。
 
 当前 115200 UART 每层约需 691 秒，24 层每 token 约 4.61 小时，**只允许用于功能正确性验证**；可用推理必须换用更高速传输接口，但继续使用相同 DDR3 目标布局。
+
+H3.1 可直接生成或上传任意真实层的 slot A 参数：
+
+```bat
+python -c "from model_tools.transformer_block_g2_payload import build_layer_parameter_uploads; print([(x.name, hex(x.byte_address), len(x.payload)) for x in build_layer_parameter_uploads(23)])"
+python tools\pangu_transformer_block_host.py --port COM20 --timeout 60 layer-params 23
+```
+
+`layer-params` 只负责换入 19 笔参数，不会自动执行 Block。当前软件金标准仍是 layer0；在任意层参考完成前，不得把 layer1..23 与 layer0 输出比较。
+
+H3.2 顺序事务与主机 dry-run：
+
+```bat
+python -m model_tools.full_model_layer_sequence verify
+python tools\pangu_full_model_h3_host.py dry-run
+```
+
+冻结清单为 24 层、456 笔参数上传、191,066,112 B、23 次 1,792 B hidden copy。独立 H3 顶层已通过 Compile/Synthesize/Device Map，但综合 setup WNS=`-0.312 ns`，尚未完成 PnR、位流或板级执行；详见 `full_model_h3/README.md`。
 
 按张量名提取任意一行：
 

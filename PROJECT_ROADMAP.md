@@ -760,7 +760,24 @@ H2 参数换层与 1 GiB DDR3 内存契约（2026-08-03，已完成）：
 - [x] 当前 hidden 物理 ping/pong 使用已验证的 `block_hidden_q10@0x00000000` 与 `block_output_q10@0x00034000`，每层交接仅 1792 B；但 G2 顶层仍固定地址，H3 必须实现层末复制或地址选择后才可勾选 hidden 双缓冲；
 - [x] 115200 UART 每层加载约 691.067 秒，24 层每 token 约 4.607 小时，只允许用于正确性验证；可用推理必须引入更高速传输，但不得改变已冻结的 DDR3 目标布局。
 
-当前唯一实施点：实现 H3 层间控制与主机换层事务。第一版先使用 slot A 和 1792 B 层末复制，从 layer0 顺序执行到 layer23；必须逐层检查参数加载完成、cfg_layer、KV 层号、hidden 交接和错误状态。slot B 预取与直接地址 ping-pong 留到该基线通过后启用。
+H3.1 任意真实层参数换入与非零层协议基线（2026-08-03，已完成）：
+
+- [x] `transformer_block_g2_payload.py` 新增 `build_layer_parameter_uploads(layer_index)`，可从真实 P50 为 layer0..23 生成固定 19 笔 slot A 事务；INT4/FP16 scale 精确原样读取，gamma 转 Q6.10，Q/K/V bias 转 Q28 行 32 B；
+- [x] layer0 新载荷与 G2 已真实板测的 resident 参数子集在名称、地址和全部 7,961,088 B 内容上逐字节一致；24 层均按 H2 源偏移/目标地址展开成功；
+- [x] `build_dynamic_uploads(..., layer_index=0)` 与 host 配置包支持非零硬件层号，默认仍为 layer0；layer23 历史 K/V 已验证指向 `0x36000000/0x36000400`；
+- [x] 上位机新增 `layer-params 0..23 [--verify]`，只执行指定层换入，不自动用 layer0 金标准运行其他层；
+- [x] 新增 `test_full_model_layer_uploads.py`，H3.1 专项 `9/9 PASS`，完整 `model_tools` 回归当时为 `215/215 PASS`。
+
+H3.2 主机顺序执行、配置读回与 hidden copy 前端基线（2026-08-03，已完成软件/前端，未完成板级）：
+
+- [x] 新增 `full_model_layer_sequence.py` 与冻结清单，固定真实 layer0..23 的 456 笔参数上传、191,066,112 B 总数据，以及 23 次 `block_output_q10@0x00034000 -> block_hidden_q10@0x00000000` 的 1,792 B/56-beat 交接；第一版只允许 slot A，slot B 预取仍禁用；
+- [x] G2 controller/top 改为参数化：默认仍为 `ACTIVE_LAYER_COUNT=1、ENABLE_DDR_COPY=0、FULL_MODEL_MODE=0`；H3 独立顶层才显式启用真实 24 层、DDR copy 和 `PANGU50K H3 LAYER V1` 标识，不开放无真实参数的 layer24..27；
+- [x] UART 新增 `L` 配置读回和 `M` DDR3 内复制；`M` 检查 32 B 对齐、正长度、1 GiB 边界和源/目标不重叠；上位机严格按 `C -> L逐字段校验 -> 19笔W -> P -> G -> 可选M` 编排单层或层范围；
+- [x] H3.1/H3.2 专项及 G2 集成检查 `42/42 PASS`，完整 `model_tools` 回归 `234/234 PASS`；冻结清单验证为 24 层、456 笔上传、23 次 hidden copy；
+- [x] 独立 `full_model_h3_top` 已通过 PDS Compile、Synthesize、Device Map；映射资源 `29741 LUT / 35225 FF / 52 DRM / 36 APM / 79 IO`；综合慢角 100 MHz setup WNS=`-0.312 ns`、TNS=`-79.872 ns`，因此当前仅是前端通过，不代表时序、位流或板卡验收；
+- [ ] 当前仍缺真实 layer1..23 完整软件 Block 金标准、H3 PnR/正式多角时序/JTAG SRAM，以及 layer0→23 连续板级逐层输出比较；因此“层间状态机/微码调度器”“hidden 双缓冲”和“从第 0 层运行到最后一层”仍不得勾选。
+
+当前唯一实施点：参数化 Attention/MLP 软件参考，使任意 layer0..23 的全部参数来自对应 P50 层，冻结至少一个单 token 的 24 层逐层 hidden SHA256；随后修复 H3 setup 违例并完成 PnR、位流、JTAG SRAM、`L/M` 命令和真实 layer0→23 顺序板级闭环。slot B 预取与无复制地址 ping-pong 留到该正确性基线通过后启用。
 
 - [ ] 层间状态机/微码调度器
 - [ ] 从第 0 层运行到最后一层

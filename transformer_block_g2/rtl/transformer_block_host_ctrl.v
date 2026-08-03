@@ -5,11 +5,14 @@
 // G2 完整 Block UART/DDR3 主机控制器。
 //
 // UART 115200 8N1，所有整数均 little-endian：
-//   I                         -> "PANGU50K G2 BLOCK V1\r\n"
+//   I                         -> G2: "PANGU50K G2 BLOCK V1\r\n"
+//                                H3: "PANGU50K H3 LAYER V1\r\n"
 //   S                         -> 'S' + flags + stage + error + "\r\n"
 //   C + <4H>                  -> 配置 layer/query_position/window_start/count
+//   L                         -> 'L' + <4H> + CRLF，读回当前配置
 //   W + <2I> + raw bytes      -> DDR3 写；header=(controller_addr, byte_length)
 //   R + <2I>                  -> 'R' + <I byte_length> + raw bytes
+//   M + <3I>                  -> DDR3 内复制；header=(src_addr,dst_addr,byte_length)
 //   P                         -> 确认本轮载荷完整
 //   G                         -> 启动 22 阶段；完成后返回
 //                                'D' + success + error + stage + watchdog<4B> + CRLF
@@ -18,8 +21,11 @@
 // byte_length 必须是 32 的倍数。运行期间 DDR3 只归 transformer_block_ctrl，
 // 主机不能注入中间结果。
 module transformer_block_host_ctrl #(
-    parameter integer CTRL_ADDR_WIDTH = 28,
-    parameter integer CLKS_PER_BIT    = 868
+    parameter integer CTRL_ADDR_WIDTH    = 28,
+    parameter integer CLKS_PER_BIT       = 868,
+    parameter integer ACTIVE_LAYER_COUNT = 1,
+    parameter integer ENABLE_DDR_COPY    = 0,
+    parameter integer FULL_MODEL_MODE    = 0
 )(
     input  wire                         core_clk,
     input  wire                         core_rst_n,
@@ -78,6 +84,13 @@ localparam [6:0] ST_SEND_INFO         = 7'd18;
 localparam [6:0] ST_SEND_STATUS       = 7'd19;
 localparam [6:0] ST_SEND_ACK          = 7'd20;
 localparam [6:0] ST_SEND_ERROR        = 7'd21;
+localparam [6:0] ST_RECV_COPY_HEADER  = 7'd22;
+localparam [6:0] ST_CHECK_COPY        = 7'd23;
+localparam [6:0] ST_SETUP_COPY_READ   = 7'd24;
+localparam [6:0] ST_WAIT_COPY_READ    = 7'd25;
+localparam [6:0] ST_SETUP_COPY_WRITE  = 7'd26;
+localparam [6:0] ST_WAIT_COPY_WRITE   = 7'd27;
+localparam [6:0] ST_SEND_CONFIG       = 7'd28;
 
 localparam [7:0] ERR_COMMAND          = 8'h01;
 localparam [7:0] ERR_DDR_NOT_READY    = 8'h02;
@@ -86,6 +99,8 @@ localparam [7:0] ERR_NOT_COMMITTED    = 8'h04;
 localparam [7:0] ERR_CONFIG           = 8'h10;
 localparam [7:0] ERR_ADDRESS          = 8'h11;
 localparam [7:0] ERR_LENGTH           = 8'h12;
+localparam [7:0] ERR_COPY_DISABLED    = 8'h13;
+localparam [7:0] ERR_COPY_OVERLAP     = 8'h14;
 localparam [7:0] ERR_BLOCK_BASE       = 8'h40;
 localparam [7:0] ERR_INTERNAL         = 8'hff;
 
@@ -108,6 +123,10 @@ reg [4:0] cfg_count;
 
 reg [63:0] command_header;
 reg [3:0] header_byte_index;
+reg [95:0] copy_header;
+reg [3:0] copy_header_byte_index;
+reg [CTRL_ADDR_WIDTH-1:0] copy_source_addr;
+reg [CTRL_ADDR_WIDTH-1:0] copy_destination_addr;
 reg [CTRL_ADDR_WIDTH-1:0] transfer_base_addr;
 reg [31:0] transfer_byte_length;
 reg [26:0] transfer_total_beats;
@@ -158,7 +177,7 @@ wire [15:0] new_count          = config_buffer[63:48];
 wire [16:0] new_expected_query =
     {1'b0, new_window_start} + {1'b0, new_count} - 17'd1;
 wire new_config_valid =
-    (new_layer == 16'd0) &&
+    (new_layer < ACTIVE_LAYER_COUNT) &&
     (new_count >= 16'd1) && (new_count <= 16'd16) &&
     (new_query_position < 16'd16384) &&
     (new_window_start < 16'd16384) &&
@@ -176,6 +195,28 @@ wire new_transfer_addr_valid =
 wire new_transfer_length_valid =
     (new_transfer_length != 32'd0) &&
     (new_transfer_length[4:0] == 5'd0);
+
+wire [31:0] new_copy_source = copy_header[31:0];
+wire [31:0] new_copy_destination = copy_header[63:32];
+wire [31:0] new_copy_length = copy_header[95:64];
+wire [31:0] new_copy_ctrl_words = new_copy_length >> 2;
+wire [32:0] new_copy_source_end =
+    {1'b0, new_copy_source} + {1'b0, new_copy_ctrl_words};
+wire [32:0] new_copy_destination_end =
+    {1'b0, new_copy_destination} + {1'b0, new_copy_ctrl_words};
+wire new_copy_address_valid =
+    (new_copy_source[31:CTRL_ADDR_WIDTH] == 0) &&
+    (new_copy_destination[31:CTRL_ADDR_WIDTH] == 0) &&
+    (new_copy_source[2:0] == 3'd0) &&
+    (new_copy_destination[2:0] == 3'd0) &&
+    (new_copy_source_end <= (33'd1 << CTRL_ADDR_WIDTH)) &&
+    (new_copy_destination_end <= (33'd1 << CTRL_ADDR_WIDTH));
+wire new_copy_length_valid =
+    (new_copy_length != 32'd0) &&
+    (new_copy_length[4:0] == 5'd0);
+wire new_copy_nonoverlap =
+    (new_copy_source_end <= {1'b0, new_copy_destination}) ||
+    (new_copy_destination_end <= {1'b0, new_copy_source});
 
 wire block_bus_active =
     (state == ST_START_BLOCK) || (state == ST_WAIT_BLOCK) || block_busy;
@@ -222,7 +263,8 @@ uart_tx #(
 );
 
 transformer_block_ctrl #(
-    .CTRL_ADDR_WIDTH (CTRL_ADDR_WIDTH),
+    .CTRL_ADDR_WIDTH    (CTRL_ADDR_WIDTH),
+    .ACTIVE_LAYER_COUNT (ACTIVE_LAYER_COUNT),
     // 每个阶段独立允许 5 秒（100 MHz 下 5 亿拍），超时由 scheduler
     // 记录准确 stage/error；禁止在完整 Block 验收版本中关闭 watchdog。
     .WATCHDOG_CYCLES (32'd500000000)
@@ -274,14 +316,14 @@ function [7:0] info_char;
             5'd6:  info_char = "0";
             5'd7:  info_char = "K";
             5'd8:  info_char = " ";
-            5'd9:  info_char = "G";
-            5'd10: info_char = "2";
+            5'd9:  info_char = FULL_MODEL_MODE ? "H" : "G";
+            5'd10: info_char = FULL_MODEL_MODE ? "3" : "2";
             5'd11: info_char = " ";
-            5'd12: info_char = "B";
-            5'd13: info_char = "L";
-            5'd14: info_char = "O";
-            5'd15: info_char = "C";
-            5'd16: info_char = "K";
+            5'd12: info_char = FULL_MODEL_MODE ? "L" : "B";
+            5'd13: info_char = FULL_MODEL_MODE ? "A" : "L";
+            5'd14: info_char = FULL_MODEL_MODE ? "Y" : "O";
+            5'd15: info_char = FULL_MODEL_MODE ? "E" : "C";
+            5'd16: info_char = FULL_MODEL_MODE ? "R" : "K";
             5'd17: info_char = " ";
             5'd18: info_char = "V";
             5'd19: info_char = "1";
@@ -326,6 +368,10 @@ always @(posedge core_clk or negedge core_rst_n) begin
         cfg_count            <= 5'd0;
         command_header       <= 64'd0;
         header_byte_index    <= 4'd0;
+        copy_header          <= 96'd0;
+        copy_header_byte_index <= 4'd0;
+        copy_source_addr     <= {CTRL_ADDR_WIDTH{1'b0}};
+        copy_destination_addr<= {CTRL_ADDR_WIDTH{1'b0}};
         transfer_base_addr   <= {CTRL_ADDR_WIDTH{1'b0}};
         transfer_byte_length <= 32'd0;
         transfer_total_beats <= 27'd0;
@@ -392,6 +438,11 @@ always @(posedge core_clk or negedge core_rst_n) begin
                             state             <= ST_RECV_CONFIG;
                         end
 
+                        8'h4c, 8'h6c: begin
+                            tx_index <= 6'd0;
+                            state    <= ST_SEND_CONFIG;
+                        end
+
                         8'h57, 8'h77: begin
                             if (!ddr_init_done) begin
                                 error_code     <= ERR_DDR_NOT_READY;
@@ -416,6 +467,22 @@ always @(posedge core_clk or negedge core_rst_n) begin
                                 command_header    <= 64'd0;
                                 header_byte_index <= 4'd0;
                                 state             <= ST_RECV_READ_HEADER;
+                            end
+                        end
+
+                        8'h4d, 8'h6d: begin
+                            if (!ENABLE_DDR_COPY) begin
+                                error_code     <= ERR_COPY_DISABLED;
+                                protocol_error <= 1'b1;
+                                state          <= ST_SEND_ERROR;
+                            end else if (!ddr_init_done) begin
+                                error_code     <= ERR_DDR_NOT_READY;
+                                protocol_error <= 1'b1;
+                                state          <= ST_SEND_ERROR;
+                            end else begin
+                                copy_header            <= 96'd0;
+                                copy_header_byte_index <= 4'd0;
+                                state                  <= ST_RECV_COPY_HEADER;
                             end
                         end
 
@@ -661,6 +728,99 @@ always @(posedge core_clk or negedge core_rst_n) begin
                 end
             end
 
+            ST_RECV_COPY_HEADER: begin
+                if (rx_valid) begin
+                    copy_header[copy_header_byte_index*8 +: 8] <= rx_data;
+                    if (copy_header_byte_index == 4'd11)
+                        state <= ST_CHECK_COPY;
+                    else
+                        copy_header_byte_index <= copy_header_byte_index + 1'b1;
+                end
+            end
+
+            ST_CHECK_COPY: begin
+                if (!new_copy_address_valid) begin
+                    error_code     <= ERR_ADDRESS;
+                    protocol_error <= 1'b1;
+                    state          <= ST_SEND_ERROR;
+                end else if (!new_copy_length_valid) begin
+                    error_code     <= ERR_LENGTH;
+                    protocol_error <= 1'b1;
+                    state          <= ST_SEND_ERROR;
+                end else if (!new_copy_nonoverlap) begin
+                    error_code     <= ERR_COPY_OVERLAP;
+                    protocol_error <= 1'b1;
+                    state          <= ST_SEND_ERROR;
+                end else begin
+                    copy_source_addr      <= new_copy_source[CTRL_ADDR_WIDTH-1:0];
+                    copy_destination_addr <= new_copy_destination[CTRL_ADDR_WIDTH-1:0];
+                    transfer_byte_length  <= new_copy_length;
+                    transfer_total_beats  <= new_copy_length[31:5];
+                    transfer_beat_index   <= 27'd0;
+                    transfer_beat         <= 256'd0;
+                    host_ar_seen          <= 1'b0;
+                    host_aw_seen          <= 1'b0;
+                    host_w_seen           <= 1'b0;
+                    state                 <= ST_SETUP_COPY_READ;
+                end
+            end
+
+            ST_SETUP_COPY_READ: begin
+                host_araddr  <= copy_source_addr + ({1'b0, transfer_beat_index} << 3);
+                host_arlen   <= 4'd0;
+                host_arvalid <= 1'b1;
+                host_ar_seen <= 1'b0;
+                state        <= ST_WAIT_COPY_READ;
+            end
+
+            ST_WAIT_COPY_READ: begin
+                if (host_ar_handshake) begin
+                    host_arvalid <= 1'b0;
+                    host_ar_seen <= 1'b1;
+                end
+                if (host_read_handshake) begin
+                    transfer_beat <= axi_rdata;
+                    host_arvalid  <= 1'b0;
+                    host_ar_seen   <= 1'b0;
+                    state          <= ST_SETUP_COPY_WRITE;
+                end
+            end
+
+            ST_SETUP_COPY_WRITE: begin
+                host_awaddr  <= copy_destination_addr + ({1'b0, transfer_beat_index} << 3);
+                host_awvalid <= 1'b1;
+                host_wdata   <= transfer_beat;
+                host_wstrb   <= 32'hffff_ffff;
+                host_aw_seen <= 1'b0;
+                host_w_seen  <= 1'b0;
+                state        <= ST_WAIT_COPY_WRITE;
+            end
+
+            ST_WAIT_COPY_WRITE: begin
+                if (host_aw_handshake) begin
+                    host_awvalid <= 1'b0;
+                    host_aw_seen <= 1'b1;
+                end
+                if (host_write_handshake)
+                    host_w_seen <= 1'b1;
+
+                if ((host_aw_seen || host_aw_handshake) &&
+                    (host_w_seen || host_write_handshake)) begin
+                    host_awvalid <= 1'b0;
+                    host_aw_seen <= 1'b0;
+                    host_w_seen  <= 1'b0;
+                    if (transfer_beat_index + 1'b1 == transfer_total_beats) begin
+                        any_write_seen <= 1'b1;
+                        protocol_error <= 1'b0;
+                        error_code     <= 8'd0;
+                        state          <= ST_SEND_ACK;
+                    end else begin
+                        transfer_beat_index <= transfer_beat_index + 1'b1;
+                        state               <= ST_SETUP_COPY_READ;
+                    end
+                end
+            end
+
             ST_START_BLOCK: begin
                 block_start       <= 1'b1;
                 block_cycle_count <= 32'd0;
@@ -697,6 +857,29 @@ always @(posedge core_clk or negedge core_rst_n) begin
                     tx_data  <= completion_byte(tx_index[3:0]);
                     tx_start <= 1'b1;
                     if (tx_index == 6'd9)
+                        state <= ST_IDLE;
+                    else
+                        tx_index <= tx_index + 1'b1;
+                end
+            end
+
+            ST_SEND_CONFIG: begin
+                if (!tx_busy && !tx_start) begin
+                    case (tx_index)
+                        6'd0: tx_data <= "L";
+                        6'd1: tx_data <= {3'd0, cfg_layer};
+                        6'd2: tx_data <= 8'd0;
+                        6'd3: tx_data <= cfg_query_position[7:0];
+                        6'd4: tx_data <= {1'b0, cfg_query_position[14:8]};
+                        6'd5: tx_data <= cfg_window_start[7:0];
+                        6'd6: tx_data <= {1'b0, cfg_window_start[14:8]};
+                        6'd7: tx_data <= {3'd0, cfg_count};
+                        6'd8: tx_data <= 8'd0;
+                        6'd9: tx_data <= 8'h0d;
+                        default: tx_data <= 8'h0a;
+                    endcase
+                    tx_start <= 1'b1;
+                    if (tx_index == 6'd10)
                         state <= ST_IDLE;
                     else
                         tx_index <= tx_index + 1'b1;

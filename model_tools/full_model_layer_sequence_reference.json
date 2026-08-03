@@ -1,0 +1,61 @@
+{
+  "schema": "pangu50k.full_model_layer_sequence.v1",
+  "mode": "slot_a_sequential_layer_reload_with_hidden_copy",
+  "active_model_layers": 24,
+  "layer_range": [
+    0,
+    23
+  ],
+  "per_layer_upload_transactions": 19,
+  "per_layer_upload_bytes": 7961088,
+  "total_upload_transactions": 456,
+  "total_upload_bytes": 191066112,
+  "hidden_copy": {
+    "command": "M",
+    "source_byte_address": 212992,
+    "source_controller_address": 53248,
+    "destination_byte_address": 0,
+    "destination_controller_address": 0,
+    "length": 1792,
+    "beats": 56
+  },
+  "hidden_copy_count": 23,
+  "hidden_copy_total_bytes": 41216,
+  "common_runtime_uploads": [
+    "rms_lut_uq12_20",
+    "softmax_exp_lut_q31",
+    "silu_pwl_q10"
+  ],
+  "layer_upload_set_sha256": [
+    "c4194d5e2f76a85451cdc54130b06d5e58df6ef629e11589de261d1163f8c061",
+    "c48e73fd7f306a0c954a8e5003fd091a14b9fe22561589cdfeb3ef55122bea30",
+    "09cd368a89419803a47e49ada28d7dfadf57fe14d04a2af584bd2d0613998e71",
+    "7437fde0f5368a3f095b97b80a4a7cfebd33391150e04d878736778ba176b126",
+    "bc88f28f2a24c33fd49e64029c476bdee7b189fa10d193bc142f68b7ecdb2e27",
+    "19df0630b3bda309b5e9b92fcb353b98dedd48e93d5ecd1cf58a636a1a7f3663",
+    "2e340fffb8e22cf2a1d0c474d964643cf5e2239c0a07b4cfbe9af4836f5ea292",
+    "41da9bfa0aae591785a8ac8a425322e2fe3e62b60cffbe813398671e885a4624",
+    "e342e2cf33f1084ef250bbdda426595f47f77b539f07e2f480ec82bb59d2484a",
+    "aae3de466f26d40d192f127adf979638d891a5d1014e032fd34d560f9c4edb30",
+    "a3e86d5693dac85a0a6fceb909305ac712af94b0b275203d05584d304fe69839",
+    "25d353d0fcc8bea50dbfca20e4a45bb10dacf77c99bb78ab1bce60a4dc9dfd57",
+    "b5e4fcb7af81de0a9d2abed5aa0a42426e2579a52fbf7ef90b0908ef0772bd55",
+    "1b0f59740149c6e0c20a8df6d16f14311eb95f0d671fa62f1f821fb411664a2c",
+    "b76ea5976ccfebb46d96b152dbbcc1c4cd40859f1a780ba44a54c5763dd88b15",
+    "24b01ee037ad61ebd86a2d36ce4d26324e4649a625d19ce62cd79dc53bb06241",
+    "e9f885ea90561cacdb82f6e1b2a2e525f316b06c380bf4508418169a8ffbc4a8",
+    "d410e82c0a46f0c2946b6fd8b9ff3ce033ce6c46b8979d14709e56e4db5a7c07",
+    "e932faa9e1da9c9d4695f43d659c43ccad2560bea153706a850a68321c8a5a4d",
+    "6453dcfd9eb06199daddfcd9c5c831aaf3e048ad5751fc7406669600ec64c680",
+    "810d0425c2f76b094a25d5baa3c8c8458d9b8afa5d01982bd34f9867fe06b87b",
+    "03bff837a543ccd9f97db6ff517e5499960acda4145ed26eaff1c3549c21bd32",
+    "49f5f31f7d563e85aaed2460ec9c2b2cc18fedee11a0ebe7d554373c1768faac",
+    "73618e7a7f50c30ecdab456675b74fca7d039c46d40cfb24c64e7d1410e44df1"
+  ],
+  "not_included": [
+    "final_rmsnorm",
+    "lm_head",
+    "logits",
+    "sampling"
+  ]
+}

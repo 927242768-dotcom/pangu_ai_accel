@@ -31,6 +31,7 @@
 25. [`mlp_down_proj_g1/README.md`](mlp_down_proj_g1/README.md)：已验证的真实 layer0 `down_proj=[896,4864]`、76-group INT4/UQ4.28 和完整 `[896]` Q28 闭环。
 26. [`mlp_residual_g1/README.md`](mlp_residual_g1/README.md)：已验证的正确 residual 支路、down Q28→Q6.10 RNE、两级饱和和完整 layer0 MLP 闭环。
 27. [`transformer_block_g2/README.md`](transformer_block_g2/README.md)：已验证的 G2 完整 layer0 Transformer Block；统一 11 路 DDR3 仲裁、22 阶段 scheduler/controller、七矩阵运行时量化、完整 PDS 多角时序、JTAG SRAM、四组真实 hidden 的 18 张量逐位比较，以及随机、地址末端和正负饱和边界均已闭环。
+28. [`full_model_h3/README.md`](full_model_h3/README.md)：正在进行的 H3 真实 24 层换层基线；456 笔参数事务、配置读回、DDR hidden copy、主机顺序器和独立 PDS 前端已建立，但尚未完成时序、位流或板级 24 层连续执行。
 
 ## 当前状态
 
@@ -99,11 +100,12 @@ G2 完整 layer0 Transformer Block 已完成独立验收。`model_tools/transfor
 ## 当前唯一下一任务
 
 ```text
-G2 单个完整 layer0 Transformer Block 已完成板级闭环，H1/H2 也已冻结真实 24 层目录与 1 GiB DDR3
-方案。采用“tied Embedding/LM Head 顶部常驻 + 每层 19 笔参数换入 slot A”：24 层 KV 占 768 MiB，
-顶部全局区结束于 0x3CE41000，仍有约 49.75 MiB 保留；H2 专项 10/10、完整软件回归 206/206 PASS。
-下一步实现 H3 层间控制与主机换层事务，第一版顺序执行 layer0..23，并使用 1792 B 层末 hidden 复制。
-当前尚未实现真实 24 层连续前向、最终 RMSNorm、LM Head、logits 或文本生成。
+G2 完整 layer0 Block、H1 真实 24 层目录和 H2 1 GiB DDR3 方案均已冻结。H3 已建立真实 24 层
+slot A 顺序事务：456 笔参数上传、23 次 1792 B hidden copy；UART 新增配置读回 `L` 与安全 DDR copy `M`，
+G2 默认单层行为保持不变。H3 专项/G2 集成 42/42、完整回归 234/234 PASS；独立顶层已通过
+Compile/Synthesize/Device Map，映射资源 29741 LUT / 35225 FF，但综合 setup WNS=-0.312 ns，尚未时序收敛。
+下一步建立 layer0..23 软件金标准并完成 H3 PnR、位流、JTAG SRAM 和真实逐层板级闭环；最终 RMSNorm、
+LM Head、logits 与文本生成仍未开始。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

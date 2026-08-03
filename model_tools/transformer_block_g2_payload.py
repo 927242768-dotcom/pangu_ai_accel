@@ -27,10 +27,15 @@ import numpy as np
 
 try:
     from .elementwise_fixed_reference import build_silu_pwl_endpoints
+    from .full_model_memory_plan import (
+        build_full_model_memory_plan,
+        expand_layer_transfer_plan,
+    )
     from .linear_quant_reference import (
         pack_int4_low_nibble_first,
         quantize_signed_q28,
     )
+    from .p50_format import P50Image
     from .rmsnorm_fixed_reference import (
         LUT_ONLY_INDEX_BITS,
         build_rsqrt_lut,
@@ -54,7 +59,12 @@ try:
     )
 except ImportError:
     from elementwise_fixed_reference import build_silu_pwl_endpoints
+    from full_model_memory_plan import (
+        build_full_model_memory_plan,
+        expand_layer_transfer_plan,
+    )
     from linear_quant_reference import pack_int4_low_nibble_first, quantize_signed_q28
+    from p50_format import P50Image
     from rmsnorm_fixed_reference import (
         LUT_ONLY_INDEX_BITS,
         build_rsqrt_lut,
@@ -368,6 +378,95 @@ def build_resident_uploads(
     return uploads
 
 
+def build_layer_parameter_uploads(
+    layer_index: int,
+    *,
+    image_path: Path = DEFAULT_IMAGE,
+) -> list[DDRUpload]:
+    """从真实 P50 构造指定 layer0..23 的 19 笔参数换入事务。
+
+    目标地址严格复用已验收 G2 的 slot A 与固定 gamma 区。七组运行时
+    combined scale 不由主机上传，仍由 FPGA 在每次矩阵调用前重建。
+    """
+
+    plan = build_full_model_memory_plan(image_path)
+    active_layers = int(plan["model"]["active_layers"])
+    if not 0 <= int(layer_index) < active_layers:
+        raise TransformerBlockPayloadError(
+            f"layer_index={layer_index} 越界，有效范围 0..{active_layers - 1}"
+        )
+
+    image = P50Image(image_path)
+    image.validate()
+    transfers = expand_layer_transfer_plan(plan, int(layer_index), slot="A")
+    regions = _regions_by_name()
+    uploads: list[DDRUpload] = []
+
+    with Path(image_path).open("rb") as handle:
+        for transfer in transfers:
+            source_offset = int(transfer["source_byte_offset"])
+            source_nbytes = int(transfer["source_nbytes"])
+            handle.seek(source_offset)
+            raw = handle.read(source_nbytes)
+            if len(raw) != source_nbytes:
+                raise TransformerBlockPayloadError(
+                    f"{transfer['source_role']} P50 读取不完整："
+                    f"{len(raw)} != {source_nbytes}"
+                )
+
+            transform = str(transfer["transform"])
+            if transform in {"copy_int4", "copy_fp16_scale"}:
+                payload = raw
+            elif transform == "fp16_to_q6_10":
+                values = np.frombuffer(raw, dtype="<f2").astype(np.float32)
+                quantized = quantize_gamma_q6_10(values)
+                if quantized.clipped_count:
+                    raise TransformerBlockPayloadError(
+                        f"layer{layer_index} {transfer['source_role']} gamma "
+                        f"出现 {quantized.clipped_count} 项饱和"
+                    )
+                payload = np.asarray(quantized.quantized, dtype="<i2").tobytes(
+                    order="C"
+                )
+            elif transform == "fp16_bias_to_q28_row32":
+                values = np.frombuffer(raw, dtype="<f2").astype(np.float32)
+                rows = int(transfer["destination_nbytes"]) // BEAT_BYTES
+                payload = _padded_bias_q28(
+                    values,
+                    rows,
+                    f"layer{layer_index} {transfer['source_role']}",
+                )
+            else:
+                raise TransformerBlockPayloadError(f"未知层参数转换：{transform}")
+
+            upload = _upload(
+                regions,
+                str(transfer["destination_region"]),
+                payload,
+                persistent=True,
+            )
+            if upload.byte_address != int(transfer["destination_byte_address"]):
+                raise TransformerBlockPayloadError(
+                    f"{upload.name} 目标地址 {upload.byte_address:#x} != "
+                    f"{int(transfer['destination_byte_address']):#x}"
+                )
+            if len(upload.payload) != int(transfer["destination_nbytes"]):
+                raise TransformerBlockPayloadError(
+                    f"{upload.name} 目标长度 {len(upload.payload)} != "
+                    f"{int(transfer['destination_nbytes'])}"
+                )
+            uploads.append(upload)
+
+    validate_uploads(uploads)
+    expected_bytes = int(plan["layer_streaming"]["destination_bytes_per_layer"])
+    actual_bytes = sum(len(item.payload) for item in uploads)
+    if actual_bytes != expected_bytes:
+        raise TransformerBlockPayloadError(
+            f"layer{layer_index} 总上传长度 {actual_bytes} != {expected_bytes}"
+        )
+    return uploads
+
+
 def build_stress_case(
     context: BlockContext,
     *,
@@ -411,9 +510,15 @@ def build_stress_case(
     )
 
 
-def build_dynamic_uploads(case: TransformerBlockCase) -> list[DDRUpload]:
-    """构造一个完整 Block 用例的 hidden、trig 与历史 K/V 上传事务。"""
+def build_dynamic_uploads(
+    case: TransformerBlockCase,
+    *,
+    layer_index: int = 0,
+) -> list[DDRUpload]:
+    """构造一个完整 Block 用例的 hidden、trig 与指定层历史 K/V 事务。"""
 
+    if not 0 <= int(layer_index) < 28:
+        raise TransformerBlockPayloadError("layer_index 必须在 0..27")
     regions = _regions_by_name()
     uploads = [
         _upload(
@@ -443,9 +548,12 @@ def build_dynamic_uploads(case: TransformerBlockCase) -> list[DDRUpload]:
         raise TransformerBlockPayloadError("history K shape 错误")
     if case.history_v_q28.shape != (expected_history, 2, 64):
         raise TransformerBlockPayloadError("history V shape 错误")
+    layer_tag = "" if int(layer_index) == 0 else f"_layer_{int(layer_index)}"
     for index in range(expected_history):
         position = case.window_start + index
-        k_byte_address, v_byte_address = kv_slot_byte_addresses(0, position)
+        k_byte_address, v_byte_address = kv_slot_byte_addresses(
+            int(layer_index), position
+        )
         k_payload = np.asarray(case.history_k_q28[index], dtype="<i8").tobytes(
             order="C"
         )
@@ -457,13 +565,13 @@ def build_dynamic_uploads(case: TransformerBlockCase) -> list[DDRUpload]:
         uploads.extend(
             (
                 DDRUpload(
-                    name=f"kv_history_k_position_{position}",
+                    name=f"kv_history_k{layer_tag}_position_{position}",
                     controller_address=k_byte_address // CONTROLLER_WORD_BYTES,
                     payload=k_payload,
                     persistent=False,
                 ),
                 DDRUpload(
-                    name=f"kv_history_v_position_{position}",
+                    name=f"kv_history_v{layer_tag}_position_{position}",
                     controller_address=v_byte_address // CONTROLLER_WORD_BYTES,
                     payload=v_payload,
                     persistent=False,

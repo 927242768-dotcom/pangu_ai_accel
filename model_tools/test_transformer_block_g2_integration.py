@@ -173,7 +173,8 @@ class TransformerBlockG2IntegrationTests(unittest.TestCase):
         self.assertIn("localparam integer NUM_MASTERS = 11", controller)
         self.assertEqual(controller.count("g2_axi_stage_mux #("), 1)
         self.assertIn(".NUM_MASTERS (NUM_MASTERS)", controller)
-        self.assertIn("(cfg_layer == 5'd0)", controller)
+        self.assertIn("parameter integer ACTIVE_LAYER_COUNT = 1", controller)
+        self.assertIn("(cfg_layer < ACTIVE_LAYER_COUNT)", controller)
         self.assertIn(".clk           (clk)", controller)
         self.assertIn(".rst_n         (rst_n)", controller)
         self.assertIn(".select_master (selected_master)", controller)
@@ -392,7 +393,9 @@ class TransformerBlockG2IntegrationTests(unittest.TestCase):
         self.assertIn("32'd500000000", host)
         self.assertNotIn(".WATCHDOG_CYCLES (32'd0)", host)
         self.assertIn("PANGU50K G2 BLOCK V1", host)
-        for command in ("8'h49", "8'h53", "8'h43", "8'h57", "8'h52", "8'h50", "8'h47"):
+        for command in (
+            "8'h49", "8'h53", "8'h43", "8'h4c", "8'h57", "8'h52", "8'h4d", "8'h50", "8'h47"
+        ):
             self.assertIn(command, host)
         self.assertIn("module transformer_block_top", top)
         self.assertIn("I_ipsxb_ddr_top", top)

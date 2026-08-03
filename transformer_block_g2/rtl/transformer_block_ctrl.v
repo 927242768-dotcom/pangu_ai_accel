@@ -21,8 +21,9 @@
 // transaction ID。所有阶段通过 transformer_block_contract.vh 的固定 DDR3 区域
 // 交换张量，主机不得注入中间结果。
 module transformer_block_ctrl #(
-    parameter integer CTRL_ADDR_WIDTH = 28,
-    parameter [31:0]  WATCHDOG_CYCLES = 32'd0
+    parameter integer CTRL_ADDR_WIDTH    = 28,
+    parameter integer ACTIVE_LAYER_COUNT = 1,
+    parameter [31:0]  WATCHDOG_CYCLES    = 32'd0
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -94,9 +95,10 @@ localparam [7:0] ERR_AXI_SELECT   = 8'h03;
 wire [15:0] expected_query_position =
     {1'b0, cfg_window_start} + {11'd0, cfg_count} - 16'd1;
 wire configuration_valid =
-    // G2 只集成 layer0 的真实参数；其他层必须等后续分层调度阶段加载
-    // 对应权重后才能开放，禁止静默使用 layer0 权重计算 layer1..27。
-    (cfg_layer == 5'd0) &&
+    // 默认 ACTIVE_LAYER_COUNT=1，保持已验收 G2 只接受 layer0。
+    // H3 wrapper 在每层参数换入完成后显式设为 24，开放真实 layer0..23；
+    // 不得使用硬件容量中没有真实模型参数的 layer24..27。
+    (cfg_layer < ACTIVE_LAYER_COUNT) &&
     (cfg_count >= 5'd1) &&
     (cfg_count <= `G2_MAX_WINDOW) &&
     (cfg_window_start < `G2_KV_MAX_POSITIONS) &&

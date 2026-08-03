@@ -1,21 +1,18 @@
 `timescale 1ns/1ps
 
-// PGL50H G2 完整 layer0 Transformer Block 板级顶层。
+// PGL50H H3 真实 24 层顺序换层基线板级顶层。
 //
-// 该顶层只复用已验证的 DDR3 Controller + PHY 引脚/复位结构，
-// 计算与主机协议全部位于独立 transformer_block_g2 工程中。
-module transformer_block_top #(
+// 保持已验证 G2 顶层的 DDR3 实例名和层级不变，使原 FDC 约束继续直接命中
+// ``I_ipsxb_ddr_top``；仅把 host 配置为真实 24 层、启用 DDR 内 copy 和 H3 标识。
+module full_model_h3_top #(
     parameter MEM_ROW_ADDR_WIDTH = 15,
     parameter MEM_COL_ADDR_WIDTH = 10,
     parameter MEM_BADDR_WIDTH    = 3,
     parameter MEM_DQ_WIDTH       = 32,
     parameter MEM_DM_WIDTH       = MEM_DQ_WIDTH/8,
-    parameter MEM_DQS_WIDTH       = MEM_DQ_WIDTH/8,
-    parameter CTRL_ADDR_WIDTH     =
-        MEM_ROW_ADDR_WIDTH + MEM_BADDR_WIDTH + MEM_COL_ADDR_WIDTH,
-    parameter ACTIVE_LAYER_COUNT  = 1,
-    parameter ENABLE_DDR_COPY     = 0,
-    parameter FULL_MODEL_MODE     = 0
+    parameter MEM_DQS_WIDTH      = MEM_DQ_WIDTH/8,
+    parameter CTRL_ADDR_WIDTH    =
+        MEM_ROW_ADDR_WIDTH + MEM_BADDR_WIDTH + MEM_COL_ADDR_WIDTH
 )(
     input                                  ref_clk,
     input                                  rst_board,
@@ -195,9 +192,9 @@ pangu_ddr3_x32 #(
 transformer_block_host_ctrl #(
     .CTRL_ADDR_WIDTH    (CTRL_ADDR_WIDTH),
     .CLKS_PER_BIT       (868),
-    .ACTIVE_LAYER_COUNT (ACTIVE_LAYER_COUNT),
-    .ENABLE_DDR_COPY    (ENABLE_DDR_COPY),
-    .FULL_MODEL_MODE    (FULL_MODEL_MODE)
+    .ACTIVE_LAYER_COUNT (24),
+    .ENABLE_DDR_COPY    (1),
+    .FULL_MODEL_MODE    (1)
 ) u_transformer_block_host_ctrl (
     .core_clk        (core_clk),
     .core_rst_n      (core_clk_rst_n),

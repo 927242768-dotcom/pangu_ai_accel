@@ -2398,3 +2398,247 @@ H2 冻结摘要 SHA256：b20800e7c24c99a24ffbf09d1888a66eced10c498cb6116bcd6922e
 ```
 
 下一步进入 H3：实现层间控制与主机参数换层事务。第一版使用 slot A、真实 layer0..23 和层末 1,792 B hidden 复制；每层必须校验加载完成、cfg_layer、KV 层号、Block 状态和输出交接。slot B 预取及直接地址 ping-pong 在该正确性基线通过后再启用。
+
+
+## 四十五、H3.1 任意真实层参数换入与非零层协议基线（2026-08-03）
+
+H2 已冻结 19 笔每层事务，本轮把规划转换为真实可上传的 DDR3 载荷，同时保持 G2 layer0 固定路径完全兼容。
+
+### 1. 任意 layer0..23 真实参数载荷
+
+`model_tools/transformer_block_g2_payload.py` 新增：
+
+```python
+build_layer_parameter_uploads(layer_index, image_path=DEFAULT_IMAGE)
+```
+
+对指定真实层执行：
+
+- 从 P50 的绝对偏移读取 7 个 packed INT4 权重；
+- 原样读取 7 个 FP16 raw group scale；
+- 将 input/post RMS gamma 从 FP16 转 Q6.10；
+- 将 Q/K/V bias 从 FP16 转 signed Q28，并按每行 32 B 展开；
+- 输出与 H2 完全一致的 19 个 `DDRUpload`；
+- 目标继续使用已验证 slot A 和固定 gamma 区；
+- 不上传七组 combined scale，继续由 FPGA 运行时生成。
+
+每层总目标载荷固定为 7,961,088 B。
+
+### 2. layer0 与已板测 resident 数据保持逐字节一致
+
+新的 layer0 19 笔载荷与 G2 已真实板测的 `build_resident_uploads()` 对应子集逐项比较：
+
+```text
+name               一致
+controller address 一致
+payload length     一致
+全部 payload bytes 一致
+```
+
+因此 H3 参数化没有改变已验收 layer0 参数内容。原 resident 仍额外包含 RMS/Softmax/SiLU 三组共享查表，共享表不随层切换。
+
+### 3. 非零 cfg_layer 与分层 KV 地址
+
+- `build_dynamic_uploads(case, layer_index=0)` 新增可选硬件层号，默认仍为 0；
+- 非零层历史 K/V 使用原 F3 公式定位对应 32 MiB layer slot；
+- layer23 position0 已验证：K=`0x36000000`、V=`0x36000400`；
+- layer0 上传名称、地址与固定 manifest 保持不变；
+- host 新增 `build_config_payload(..., layer_index=0)`，固件 `C` 命令首字段可发送 0..27；
+- `run_fixed_case()` 可传层号，但现有 CLI 固定用例仍默认 layer0，避免错误复用金标准。
+
+### 4. 上位机换层命令
+
+新增：
+
+```bat
+python tools\pangu_transformer_block_host.py --port COM20 --timeout 60 layer-params 23
+```
+
+该命令只把指定真实层的 19 笔参数换入 slot A，可选 `--verify` 回读；不会自动执行 Block，也不会把 layer1..23 与 layer0 结果比较。
+
+### 5. 自动验证
+
+新增 `model_tools/test_full_model_layer_uploads.py`，覆盖：
+
+- layer0 新旧参数逐字节等价；
+- 24 层均生成 19 笔事务；
+- 四个代表层的 INT4/FP16 scale 与 P50 原始字节一致；
+- combined scale 不进入主机上传；
+- layer0 默认动态载荷兼容；
+- layer23 历史 KV 地址；
+- config 包 layer 字段；
+- host `layer-params` CLI；
+- layer 越界拒绝。
+
+结果：
+
+```text
+H3.1 专项测试：9/9 PASS
+完整 model_tools 回归：215/215 PASS
+```
+
+### 6. 当前唯一下一任务
+
+当前只能换入和配置任意层，尚不能对 layer1..23 做正确性判断。下一步必须把 Attention、O_proj、post RMS、gate/up、down 各参数加载入口改为默认 layer0、可选 layer0..23，建立真实 24 层单 token 软件金标准；随后实现 host 辅助 layer0→23 顺序执行和每层 1,792 B hidden 交接。层间状态机、hidden 双缓冲和完整 24 层前向仍未完成。
+
+
+## 四十六、H3.2 主机顺序执行、配置读回与 hidden copy 前端基线（2026-08-03）
+
+本轮在 H3.1 的任意层 19 笔参数换入基础上，建立第一版真实 24 层顺序控制协议。该结论只表示软件事务、RTL 协议和 PDS 前端通过；尚未完成 H3 PnR、时序、位流或板级连续执行。
+
+### 1. 24 层顺序事务冻结
+
+新增：
+
+```text
+model_tools/full_model_layer_sequence.py
+model_tools/full_model_layer_sequence_reference.json
+model_tools/test_full_model_layer_sequence.py
+```
+
+冻结清单：
+
+```text
+真实层范围              layer0..23
+每层参数事务            19
+每层上传                7,961,088 B
+24 层合计               456 笔 / 191,066,112 B
+hidden 交接             23 次
+单次交接                1,792 B / 56 个 256-bit beat
+源                       block_output_q10 @ 0x00034000
+目标                     block_hidden_q10 @ 0x00000000
+```
+
+顺序器直接复用 H3.1 的 `build_layer_parameter_uploads()`，不保留第二套参数转换定义。第一版只允许 slot A；slot B 预取和无复制基址 ping-pong 仍未启用。
+
+三个公共查表 `rms_lut_uq12_20 / softmax_exp_lut_q31 / silu_pwl_q10` 只在上电后上传一次，不重复计入每层 19 笔。
+
+### 2. G2 默认行为保持不变
+
+`transformer_block_ctrl.v`、`transformer_block_host_ctrl.v` 和 `transformer_block_top.v` 增加参数：
+
+```text
+ACTIVE_LAYER_COUNT
+ENABLE_DDR_COPY
+FULL_MODEL_MODE
+```
+
+默认值仍为：
+
+```text
+ACTIVE_LAYER_COUNT = 1
+ENABLE_DDR_COPY   = 0
+FULL_MODEL_MODE   = 0
+```
+
+因此原 G2 位流源码仍只接受 layer0，不启用 DDR copy，INFO 仍为 `PANGU50K G2 BLOCK V1`。独立 H3 顶层才显式设置 24/1/1，并拒绝没有真实 P50 参数的 layer24..27。
+
+### 3. UART `L/M` 扩展
+
+新增 `L` 配置读回：
+
+```text
+'L' + layer/query/window/count 四个 uint16 + CRLF
+```
+
+主机在每层启动前把 `C` 写入值与 `L` 读回值逐字段比较，避免只依赖 ACK。
+
+新增 `M` DDR3 内复制：
+
+```text
+'M' + src_controller_addr:uint32 + dst_controller_addr:uint32 + byte_length:uint32
+```
+
+硬件检查：
+
+- 源/目标按 8 controller word，即 32 B 对齐；
+- length 大于 0 且按 32 B 对齐；
+- 首尾不越过 1 GiB Controller 地址空间；
+- 源/目标范围不重叠；
+- 每次先读一个 256-bit beat，再写一个 beat。
+
+错误码新增 copy disabled 和 copy overlap，协议错误继续为粘滞状态。
+
+### 4. H3 主机顺序器
+
+新增：
+
+```text
+tools/pangu_full_model_h3_host.py
+```
+
+每层顺序固定为：
+
+```text
+C 配置
+→ L 读回并逐字段核对
+→ 19 笔 W 参数换入
+→ P 提交
+→ G 执行完整 22 阶段 Block
+→ 除最后一层外执行 M hidden copy
+→ S 检查 block/protocol/error 状态
+```
+
+支持单层、指定层范围和完整 layer0..23 dry-run。115200 UART 每层仍约 691 秒，完整 24 层每 token 约 4.61 小时，只用于正确性验证。
+
+### 5. 测试结果
+
+新增 `test_full_model_h3_protocol.py`，覆盖实际 `C/L/M` 字节帧、配置读回、copy 对齐/重叠拒绝、G2 默认参数和 H3 顶层。最终：
+
+```text
+H3.1 参数上传测试           9/9 PASS
+H3.2 层顺序测试            10/10 PASS
+H3.2 UART/RTL 协议测试      9/9 PASS
+连同 G2 集成专项           42/42 PASS
+完整 model_tools 回归      234/234 PASS
+冻结清单 verify            PASS
+H3 host dry-run             PASS
+```
+
+### 6. PDS 前端
+
+新增独立工程：
+
+```text
+full_model_h3/rtl/full_model_h3_top.v
+full_model_h3/pnr/build_full_model_h3.tcl
+full_model_h3/README.md
+```
+
+初版外层 wrapper 会改变 DDR3 层级，导致原 FDC 找不到 `I_ipsxb_ddr_top`；最终 H3 顶层直接保留 G2 相同实例名与层级，不修改已验证约束。
+
+PDS 2022.2-SP6.4 结果：
+
+```text
+Compile      PASS
+Synthesize   PASS
+Device Map   PASS
+```
+
+映射资源：
+
+```text
+LUT             29,741 / 42,800
+FF              35,225 / 64,200
+Distributed RAM 332
+DRM             52 / 134
+APM             36 / 84
+IO              79 / 296
+```
+
+综合慢角时序估算：
+
+```text
+ddrphy_clkin setup WNS = -0.312 ns
+TNS                    = -79.872 ns
+failing endpoints      = 256
+hold/recovery/removal/min-pulse 无违例
+```
+
+因此当前只允许宣称前端集成成功；尚未完成 PnR、正式多角时序、未布线网络 0、Bitstream 或 JTAG SRAM。
+
+### 7. 当前唯一下一任务
+
+建立真实 layer0..23 的完整软件 Block 金标准，使 Attention、O_proj、post RMS、gate/up、down 的参数都来自对应 P50 层，并冻结至少一个单 token 的 24 层逐层 hidden SHA256。之后修复 H3 setup 违例，完成 PnR、多角时序、位流、JTAG SRAM、`L/M` 命令和 layer0→23 顺序板级闭环。
+
+上述全部通过前，“层间状态机/微码调度器”“hidden 双缓冲”“从第 0 层运行到最后一层”继续保持未勾选，也不得进入最终 RMSNorm、LM Head、logits 或文本生成。

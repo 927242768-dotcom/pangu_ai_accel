@@ -41,6 +41,7 @@ if str(MODEL_TOOLS) not in sys.path:
 from transformer_block_g2_payload import (  # noqa: E402
     DDRUpload,
     build_dynamic_uploads,
+    build_layer_parameter_uploads,
     build_resident_uploads,
     build_stress_case,
 )
@@ -191,15 +192,29 @@ def read_status(port: "serial.Serial", timeout: float) -> dict[str, object]:
     }
 
 
-def configure_case(
-    port: "serial.Serial", case: TransformerBlockCase, timeout: float
-) -> None:
-    payload = CONFIG_STRUCT.pack(
-        0,
+def build_config_payload(
+    case: TransformerBlockCase,
+    *,
+    layer_index: int = 0,
+) -> bytes:
+    if not 0 <= int(layer_index) < 28:
+        raise ValueError("layer_index 必须在 0..27")
+    return CONFIG_STRUCT.pack(
+        int(layer_index),
         case.query_position,
         case.window_start,
         case.count,
     )
+
+
+def configure_case(
+    port: "serial.Serial",
+    case: TransformerBlockCase,
+    timeout: float,
+    *,
+    layer_index: int = 0,
+) -> None:
+    payload = build_config_payload(case, layer_index=layer_index)
     port.reset_input_buffer()
     write_all(port, b"C" + payload)
     read_ack(port, timeout)
@@ -398,11 +413,12 @@ def run_fixed_case(
     baud: int,
     timeout: float,
     final_only: bool,
+    layer_index: int = 0,
 ) -> float:
-    configure_case(port, case, timeout)
+    configure_case(port, case, timeout, layer_index=layer_index)
     upload_many(
         port,
-        build_dynamic_uploads(case),
+        build_dynamic_uploads(case, layer_index=layer_index),
         baud=baud,
         timeout=timeout,
         verify=False,
@@ -461,6 +477,13 @@ def build_parser() -> argparse.ArgumentParser:
     resident = sub.add_parser("resident")
     resident.add_argument("--verify", action="store_true")
 
+    layer_params = sub.add_parser(
+        "layer-params",
+        help="把指定真实 layer0..23 的 19 笔参数换入当前 slot A",
+    )
+    layer_params.add_argument("layer", type=int)
+    layer_params.add_argument("--verify", action="store_true")
+
     case_parser = sub.add_parser("case")
     case_parser.add_argument("case")
     case_parser.add_argument("--load-resident", action="store_true")
@@ -509,6 +532,20 @@ def main(argv: Iterable[str] | None = None) -> int:
                 timeout=args.timeout,
                 verify=args.verify,
             )
+            return 0
+
+        if args.command == "layer-params":
+            upload_many(
+                port,
+                build_layer_parameter_uploads(
+                    args.layer,
+                    image_path=args.image,
+                ),
+                baud=args.baud,
+                timeout=args.timeout,
+                verify=args.verify,
+            )
+            print(f"LAYER PARAMS PASS: layer={args.layer}, slot=A")
             return 0
 
         cases = build_fixed_real_cases(image_path=args.image)
