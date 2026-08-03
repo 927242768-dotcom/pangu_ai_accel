@@ -106,6 +106,9 @@ FP16 张量没有 scale、padded columns 或 groups 字段。
 | `model_layer_descriptor.py` | H1 真实 24 层描述生成器；冻结层模板、主机 data/scale 文件偏移、模型/硬件容量差异并支持按层展开 |
 | `model_layer_descriptor_reference.json` | 24 层、290 张量、层步长和 tied LM Head 的冻结机器可读契约 |
 | `test_model_layer_descriptor.py` | 将 24×12 个层内张量的绝对偏移、形状、存储和量化字段逐项与真实 P50 目录比较 |
+| `full_model_memory_plan.py` | H2 1 GiB DDR3 分区、24 层参数换入、tied 全局参数常驻、hidden 交接和传输时间规划器 |
+| `full_model_memory_plan_reference.json` | 完整 H2 计划规范化 SHA256 与关键分区边界冻结摘要 |
+| `test_full_model_memory_plan.py` | 验证 1 GiB 连续覆盖、G2 地址兼容、19 笔层事务、24 层 KV、A/B 槽和 UART 限制 |
 | `linear_quant_reference.py` | 真实 Linear 切片的激活 INT8、分组 scale UQ4.28 与定点输出金标准 |
 | `q_proj_m4k896_reference.json` | layer0 q_proj 的 M=4、K=896 固定向量输出与各数据区 SHA256 |
 | `q_proj_full_reference.json` | layer0 q_proj 完整 M=896、K=896 固定输出、上传布局与 SHA256 清单 |
@@ -194,11 +197,36 @@ python -m model_tools.model_layer_descriptor verify
 python -m model_tools.model_layer_descriptor layer 23
 ```
 
-展开全部 24 层供后续权重加载器或微码生成器消费：
+展开全部 24 层供后续参数加载器或微码生成器消费：
 
 ```bat
 python -m model_tools.model_layer_descriptor all-layers
 ```
+
+查看并验证 H2 的 1 GiB DDR3 与按层换入方案：
+
+```bat
+python -m model_tools.full_model_memory_plan summary
+python -m model_tools.full_model_memory_plan verify
+```
+
+展开 layer23 的 19 笔主机文件→DDR3 事务；slot B 当前仅为后续预取保留：
+
+```bat
+python -m model_tools.full_model_memory_plan layer 23 --slot A
+python -m model_tools.full_model_memory_plan layer 23 --slot B
+```
+
+H2 冻结方案：
+
+- `0x00000000..0x00FFFFFF`：G2 runtime/scratch；
+- `0x01000000..0x01FFFFFF`：当前活动层参数 slot A；
+- `0x02000000..0x02FFFFFF`：后续预取 slot B；
+- `0x08000000..0x37FFFFFF`：真实 24 层、16384-token KV Cache；
+- `0x38000000..0x3CE40FFF`：tied Embedding/LM Head、最终 Norm、combined scale 与 logits；
+- `0x3CE41000..0x3FFFFFFF`：约 49.75 MiB 高端保留区。
+
+当前 115200 UART 每层约需 691 秒，24 层每 token 约 4.61 小时，**只允许用于功能正确性验证**；可用推理必须换用更高速传输接口，但继续使用相同 DDR3 目标布局。
 
 按张量名提取任意一行：
 

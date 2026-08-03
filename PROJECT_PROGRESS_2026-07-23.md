@@ -2293,3 +2293,108 @@ H1 的模型目录与主机文件偏移已冻结。下一步必须基于真实 2
 4. 明确每层切换时的上传顺序、覆盖安全性和验收规则。
 
 在上述内存与加载方案冻结前，不开始层间 scheduler/微码 RTL。
+
+
+## 四十四、H2 参数按层换入与 1 GiB DDR3 分区契约（2026-08-03）
+
+H1 已冻结真实 24 层目录，本轮继续完成阶段 H 的内存可行性分析和参数换层事务。新增：
+
+```text
+model_tools/full_model_memory_plan.py
+model_tools/full_model_memory_plan_reference.json
+model_tools/test_full_model_memory_plan.py
+```
+
+### 1. 为什么不能让全部模型参数与 16K KV 同时常驻
+
+真实 P50 镜像为 263,857,920 B，约 251.63 MiB。当前每层 K/V Cache：
+
+```text
+16384 token × (1024 B K + 1024 B V) = 32 MiB/layer
+24 layers × 32 MiB = 768 MiB
+```
+
+1 GiB DDR3 扣除 768 MiB KV 后只余 256 MiB。该空间不能同时安全容纳 251.63 MiB P50、G2 runtime/scratch、运行时量化的 combined scale、hidden、GEMV 输出和对齐间隙。因此冻结以下混合方案：
+
+```text
+scheme = hybrid_global_resident_layer_reload
+```
+
+- tied Embedding/LM Head、其 raw FP16 scale 和最终 RMSNorm gamma 会话常驻；
+- 24 个 Transformer 层按 layer0..23 顺序重载；
+- 七组 UQ4.28 combined scale 不从主机上传，由 FPGA 每个矩阵调用运行时重建；
+- RMS/Softmax/SiLU 表会话常驻，RoPE 表按 query 更新。
+
+### 2. 1 GiB DDR3 冻结分区
+
+| 区域 | 字节地址 | 容量 | 用途 |
+|---|---|---:|---|
+| runtime/control/scratch | `0x00000000..0x00FFFFFF` | 16 MiB | 已验证 G2 中间张量、执行载荷、查表与每层 gamma |
+| layer slot A | `0x01000000..0x01FFFFFF` | 16 MiB | 当前活动层参数，完全兼容 G2 固定地址 |
+| layer slot B | `0x02000000..0x02FFFFFF` | 16 MiB | 后续高速接口预取槽，当前尚未选择 |
+| low free reserve | `0x03000000..0x07FFFFFF` | 80 MiB | scheduler、DMA、传输 staging 与扩展 |
+| active 24-layer KV | `0x08000000..0x37FFFFFF` | 768 MiB | 24 层 × 16384 token K/V |
+| global/LM Head | `0x38000000..0x3CE40FFF` | 82,055,168 B | tied 全局参数、最终 Norm、LM combined scale 与 logits |
+| high free reserve | `0x3CE41000..0x3FFFFFFF` | 52,162,560 B | top-k、采样、调试与扩展 |
+
+七个顶层分区首尾连续、无重叠、恰好覆盖 `0x00000000..0x3FFFFFFF`。
+
+### 3. 顶部全局常驻与 LM Head 预留
+
+顶部从 `0x38000000` 开始，包含：
+
+- tied Embedding/LM Head packed INT4：68,067,328 B；
+- tied raw FP16 scale：4,254,208 B；
+- 最终 RMSNorm gamma Q6.10：1,792 B；
+- LM Head UQ4.28 combined-scale：8,508,416 B；
+- 完整 vocab `[151936]` signed int64 Q28 logits：1,215,488 B。
+
+Embedding 与 LM Head 共用同一 packed 权重，不复制 68 MiB 数据。全局区结束后仍保留约 49.75 MiB。
+
+### 4. 每层 19 笔参数事务
+
+每个真实层固定执行 19 笔主机文件到 DDR3 的转换/拷贝：
+
+- 7 个 packed INT4 数据区直接拷贝；
+- 7 个 FP16 raw scale 直接拷贝；
+- input/post RMS gamma 两项由 FP16 转 Q6.10；
+- Q/K/V bias 三项由 FP16 转 signed Q28，并按每行 32 B 展开；
+- 合计 P50 源数据 7,926,528 B；
+- 合计 DDR3 目标数据 7,961,088 B；
+- slot A 当前已使用跨度 9,065,472 B，16 MiB 槽内仍余 7,711,744 B。
+
+规划器可展开 layer0..23 的绝对 P50 源偏移和 slot A/B 目标地址。slot B 只移动参数槽内区域；两个 gamma 仍在固定 runtime 区，后续切槽时只需在层间更新这 3,584 B。
+
+### 5. hidden 交接与当前 RTL 边界
+
+已验证 G2 当前存在两个物理 hidden 区：
+
+```text
+ping = block_hidden_q10  @ 0x00000000, 1792 B
+pong = block_output_q10  @ 0x00034000, 1792 B
+```
+
+第一版 H3 可在层末执行 1,792 B `pong -> ping` DDR 内复制，再启动下一层。真正无复制 ping-pong 需要把 `transformer_block_ctrl` 的输入/输出宏改成可选基址；该 RTL 尚未实现，因此路线图中的 hidden 双缓冲仍保持未勾选。
+
+### 6. 传输性能结论
+
+当前 115200 UART、8N1 的理论线速下：
+
+```text
+单层目标数据：7,961,088 B
+单层换入时间：约 691.067 s（11.52 min）
+24 层每 token：约 16,585.6 s（4.607 h）
+全局常驻初次上传：约 6,278.1 s（104.63 min）
+```
+
+因此 UART 只允许用于逐层正确性验收，不得宣称可用推理性能。后续必须引入更高速接口或 DMA/存储路径，但目标 DDR3 布局、转换格式和逐层事务保持不变。
+
+### 7. 自动验证与下一任务
+
+```text
+H2 专项测试：10/10 PASS
+H2 冻结摘要 SHA256：b20800e7c24c99a24ffbf09d1888a66eced10c498cb6116bcd6922e4dea6fa88
+完整 model_tools 回归：206/206 PASS
+```
+
+下一步进入 H3：实现层间控制与主机参数换层事务。第一版使用 slot A、真实 layer0..23 和层末 1,792 B hidden 复制；每层必须校验加载完成、cfg_layer、KV 层号、Block 状态和输出交接。slot B 预取及直接地址 ping-pong 在该正确性基线通过后再启用。

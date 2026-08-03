@@ -1,0 +1,54 @@
+{
+  "schema": "pangu50k.full_model_memory_plan.reference.v1",
+  "plan_schema": "pangu50k.full_model_memory_plan.v1",
+  "plan_sha256": "b20800e7c24c99a24ffbf09d1888a66eced10c498cb6116bcd6922e4dea6fa88",
+  "active_layers": 24,
+  "hardware_layer_capacity": 28,
+  "hardware_max_context": 16384,
+  "scheme": "hybrid_global_resident_layer_reload",
+  "partitions": [
+    {
+      "name": "runtime_control_scratch",
+      "byte_start": 0,
+      "byte_end": 16777216
+    },
+    {
+      "name": "layer_parameter_slot_a",
+      "byte_start": 16777216,
+      "byte_end": 33554432
+    },
+    {
+      "name": "layer_parameter_slot_b",
+      "byte_start": 33554432,
+      "byte_end": 50331648
+    },
+    {
+      "name": "low_free_reserve",
+      "byte_start": 50331648,
+      "byte_end": 134217728
+    },
+    {
+      "name": "kv_cache_active_24_layers",
+      "byte_start": 134217728,
+      "byte_end": 939524096
+    },
+    {
+      "name": "global_resident_and_lm_head",
+      "byte_start": 939524096,
+      "byte_end": 1021579264
+    },
+    {
+      "name": "high_free_reserve",
+      "byte_start": 1021579264,
+      "byte_end": 1073741824
+    }
+  ],
+  "layer_transfer_count": 19,
+  "source_bytes_per_layer": 7926528,
+  "destination_bytes_per_layer": 7961088,
+  "kv_size_bytes": 805306368,
+  "global_layout_end": 1021579264,
+  "high_free_bytes": 52162560,
+  "hidden_copy_bytes": 1792,
+  "uart_hours_per_token": 4.607111111111112
+}

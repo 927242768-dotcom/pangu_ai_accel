@@ -741,15 +741,27 @@ H1 模型层描述与主机文件偏移契约（2026-08-03，已完成）：
 - [x] 24 层结构完全同构：首层文件偏移 `72851456`，层步长 `7958528 B`，每层有效跨度 `7955456 B`，层间 4 KiB 对齐间隙 `3072 B`；12 类张量的 shape、INT4/FP16、data/scale 相对偏移、长度、group 数均冻结为层模板；
 - [x] 描述器可展开任意层或全部层，已把 288 个层内张量的绝对 data/scale 主机文件偏移逐项与 P50 原目录比较；H1 新增 `9/9 PASS`，完整 `model_tools` 回归 `196/196 PASS`。
 
-当前唯一实施点：基于该 24 层描述表设计权重流式加载/按层重载方案，并同步冻结 1 GiB DDR3 的参数缓冲、hidden 双缓冲、scratch、KV Cache 和 GEMV 输出分区；在该内存方案完成前不得开始层间调度 RTL。
-
-- [ ] 设计权重流式加载方案
-- [ ] 决定模型权重是否常驻 DDR3 或按层重载
-- [ ] 设计 1 GiB DDR3 内存分区
+- [x] 设计权重流式加载方案
+- [x] 决定模型权重是否常驻 DDR3 或按层重载
+- [x] 设计 1 GiB DDR3 内存分区
 - [ ] hidden state 双缓冲
-- [ ] 激活 scratch buffer
-- [ ] KV Cache 区域
-- [ ] GEMV 输出区
+- [x] 激活 scratch buffer
+- [x] KV Cache 区域
+- [x] GEMV 输出区
+
+H2 参数换层与 1 GiB DDR3 内存契约（2026-08-03，已完成）：
+
+- [x] 新增 `model_tools/full_model_memory_plan.py`、冻结摘要 `full_model_memory_plan_reference.json` 和 `test_full_model_memory_plan.py`；H2 专项 `10/10 PASS`，完整 `model_tools` 回归 `206/206 PASS`；
+- [x] 明确 16K 上下文下无法让全部参数常驻：24 层 KV 占 768 MiB，剩余 256 MiB 无法同时容纳 251.63 MiB P50、G2 scratch、运行时量化缓冲和对齐；因此采用 `hybrid_global_resident_layer_reload`；
+- [x] 顶部 `0x38000000` 起常驻 tied Embedding/LM Head packed INT4、FP16 raw scale 和最终 RMSNorm gamma，并预留 8,508,416 B LM Head combined-scale 与 1,215,488 B Q28 logits；全局区结束于 `0x3CE41000`，顶部仍余 52,162,560 B；
+- [x] 每个 Transformer 层按 19 笔事务加载：P50 源数据 7,926,528 B，DDR 目标 7,961,088 B；INT4/FP16 scale 直拷，两个 gamma 转 Q6.10，Q/K/V bias 转 Q28 并按每行 32 B 展开；七组 combined scale 继续由 FPGA 运行时生成；
+- [x] 低端保持 G2 地址兼容：`0x00000000..0x00FFFFFF` 为 runtime/scratch，slot A=`0x01000000..0x01FFFFFF` 为当前活动层，slot B=`0x02000000..0x02FFFFFF` 仅为后续高速预取保留，`0x03000000..0x07FFFFFF` 保留给 DMA/微码/staging；
+- [x] 真实 24 层 KV 固定为 `0x08000000..0x37FFFFFF`，层步长 32 MiB、每 token K/V 共 2048 B、硬件上下文 16384；不访问容量中不存在模型参数的 layer24..27；
+- [x] 当前 hidden 物理 ping/pong 使用已验证的 `block_hidden_q10@0x00000000` 与 `block_output_q10@0x00034000`，每层交接仅 1792 B；但 G2 顶层仍固定地址，H3 必须实现层末复制或地址选择后才可勾选 hidden 双缓冲；
+- [x] 115200 UART 每层加载约 691.067 秒，24 层每 token 约 4.607 小时，只允许用于正确性验证；可用推理必须引入更高速传输，但不得改变已冻结的 DDR3 目标布局。
+
+当前唯一实施点：实现 H3 层间控制与主机换层事务。第一版先使用 slot A 和 1792 B 层末复制，从 layer0 顺序执行到 layer23；必须逐层检查参数加载完成、cfg_layer、KV 层号、hidden 交接和错误状态。slot B 预取与直接地址 ping-pong 留到该基线通过后启用。
+
 - [ ] 层间状态机/微码调度器
 - [ ] 从第 0 层运行到最后一层
 - [ ] 最终 RMSNorm
