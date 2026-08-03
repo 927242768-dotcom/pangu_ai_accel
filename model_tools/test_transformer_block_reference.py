@@ -75,6 +75,10 @@ class TransformerBlockReferenceTests(unittest.TestCase):
         self.assertEqual(actual, EXPECTED_OUTPUT_SHA256)
         for case in self.cases:
             self.assertEqual(case.block_input_q10.shape, (HIDDEN_SIZE,))
+            self.assertEqual(case.current_q_q28.shape, (14, 64))
+            self.assertEqual(case.current_k_q28.shape, (2, 64))
+            self.assertEqual(case.current_q_rope_q28.shape, (14, 64))
+            self.assertEqual(case.current_k_rope_q28.shape, (2, 64))
             self.assertEqual(case.output_q10.shape, (HIDDEN_SIZE,))
             self.assertTrue(np.issubdtype(case.output_q10.dtype, np.signedinteger))
 

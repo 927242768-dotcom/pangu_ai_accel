@@ -117,6 +117,8 @@ class TokenAttentionState:
     hidden_seed: int
     hidden_q10: np.ndarray
     norm_q10: np.ndarray
+    q_q28: np.ndarray
+    k_q28: np.ndarray
     q_rope_q28: np.ndarray
     k_rope_q28: np.ndarray
     v_q28: np.ndarray
@@ -280,6 +282,8 @@ def build_token_state(
         hidden_seed=hidden_seed,
         hidden_q10=rms.activation.quantized.astype(np.int16),
         norm_q10=rms.output_lut_q10.astype(np.int16),
+        q_q28=q_before.copy(),
+        k_q28=k_before.copy(),
         q_rope_q28=apply_rope_fixed_q28(q_before, trig, heads=14).astype(np.int64),
         k_rope_q28=apply_rope_fixed_q28(k_before, trig, heads=2).astype(np.int64),
         v_q28=v_heads,

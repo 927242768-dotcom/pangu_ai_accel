@@ -177,6 +177,8 @@ class TransformerBlockCase:
     hidden_seed_base: int
     block_input_q10: np.ndarray
     input_norm_q10: np.ndarray
+    current_q_q28: np.ndarray
+    current_k_q28: np.ndarray
     current_q_rope_q28: np.ndarray
     current_k_rope_q28: np.ndarray
     current_v_q28: np.ndarray
@@ -490,6 +492,8 @@ def build_case(
         hidden_seed_base=int(hidden_seed_base),
         block_input_q10=current.hidden_q10.astype(np.int16).copy(),
         input_norm_q10=current.norm_q10.astype(np.int16).copy(),
+        current_q_q28=current.q_q28.astype(np.int64).copy(),
+        current_k_q28=current.k_q28.astype(np.int64).copy(),
         current_q_rope_q28=current.q_rope_q28.astype(np.int64).copy(),
         current_k_rope_q28=current.k_rope_q28.astype(np.int64).copy(),
         current_v_q28=current.v_q28.astype(np.int64).copy(),

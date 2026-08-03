@@ -30,11 +30,11 @@
 24. [`mlp_silu_up_mul_g1/README.md`](mlp_silu_up_mul_g1/README.md)：已验证的完整 signed 80-bit Q38 乘积、RNE、int64 饱和和 `[4864]` `SiLU(gate) × up` 闭环。
 25. [`mlp_down_proj_g1/README.md`](mlp_down_proj_g1/README.md)：已验证的真实 layer0 `down_proj=[896,4864]`、76-group INT4/UQ4.28 和完整 `[896]` Q28 闭环。
 26. [`mlp_residual_g1/README.md`](mlp_residual_g1/README.md)：已验证的正确 residual 支路、down Q28→Q6.10 RNE、两级饱和和完整 layer0 MLP 闭环。
-27. [`transformer_block_g2/README.md`](transformer_block_g2/README.md)：正在进行的 G2 完整 layer0 Transformer Block 集成；软件全链、固定地址/矩阵/25 状态契约、共享 Linear、22 阶段 scheduler，以及 Q6.10/Q28 运行时量化 DDR3 子系统均已建立。量化子系统已完成七矩阵自动逐位、独立 PnR/多角时序、位流、JTAG SRAM 和真实板卡压力；完整 Block 的统一 DDR3 仲裁/controller/top 与连贯板级闭环尚未完成。
+27. [`transformer_block_g2/README.md`](transformer_block_g2/README.md)：已验证的 G2 完整 layer0 Transformer Block；统一 11 路 DDR3 仲裁、22 阶段 scheduler/controller、七矩阵运行时量化、完整 PDS 多角时序、JTAG SRAM、四组真实 hidden 的 18 张量逐位比较，以及随机、地址末端和正负饱和边界均已闭环。
 
 ## 当前状态
 
-已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、第一处残差的完整 layer0 Attention 子层，以及 G1 MLP 输入 `post_attention_layernorm`、gate/up 双投影、`SiLU(gate)`、`SiLU(gate) × up`、真实 `down_proj` 和第二处残差；完整 layer0 MLP 已闭环：
+已经真实上板完成从单点积、完整真实 Linear 层到 RMSNorm、元素级非线性、Embedding、完整 Q/K/V、RoPE、KV Cache、Attention Score、Softmax、Attention 输出加权和、真实 O_proj、两处残差与完整 MLP；G2 已把这些算子连成同一 hidden state 出发的完整 layer0 Transformer Block，并完成独立 PDS、逐位和边界板级闭环：
 
 ```text
 长度16单点积：
@@ -94,16 +94,15 @@ G1 MLP `down_proj` 现已完成。独立工程 `mlp_down_proj_g1` 直接消费�
 
 G1 MLP 第二处残差与完整 MLP 现已完成。独立工程 `mlp_residual_g1` 严格使用完整 Attention 第一处残差后的 `[896]` signed Q6.10 hidden，而不是 `post_attention_layernorm` 输出；down 分支使用已验证 `[896]` signed int64 Q28。硬件执行 signed RNE `>>18`、第一次 int16 饱和、残差相加和第二次 int16 饱和。四组连贯真实固定输入全部 `896/896` 上板逐位一致；新增测试 `5/5 PASS`，完整软件回归 `142/142 PASS`，软件随机/边界 `1000/1000 PASS`，同一 seed 连续真实 FPGA index=`0..299` 累计 `300/300 PASS`。PDS `All Constraints Met`，慢角 setup WNS=`+0.727 ns`、hold WHS=`+0.169 ns`，快角 setup WNS=`+3.298 ns`、hold WHS=`+0.100 ns`，TNS/THS 全 0；验收位流 SHA256=`ddc424fae630fda5ab55acc8d2cb12d80b3f8cca1d5341f4a455ec0aa0a0e42b`。
 
-G2 软件集成基线与运行时量化子系统已经完成独立验收。`model_tools/transformer_block_reference.py` 从同一组 block hidden state 连贯执行完整 layer0 Block，四组 query/count=`0/1、1/2、5/6、15/16` 的最终 SHA256 与 G1 第二处残差结果完全一致。当前契约包含 28 个 scratch/查表区域、24 个参数/scale 区、七个矩阵调用和 25 个状态 ID；共享 Linear、运行时 DDR3 Linear controller 和 22 阶段 scheduler 均已建立。量化验证工程对 q/k/v/o/gate/up/down 七个真实矩阵自动核对全部 INT8、max metadata、UQ4.28、14→16/76→80 padding 和 AXI 地址/burst，真实板卡 `7/7 PASS`；Q6.10 随机/边界 `100/100 PASS`，Q28 随机/边界 `24/24 PASS`。最新完整 `model_tools` 回归 `165/165 PASS`，量化事务软件压力 `1000/1000 PASS`。PDS `All Constraints Met`，慢角用户时钟 setup WNS=`+0.187 ns`、hold WHS=`+0.171 ns`，TNS/THS 全 0；位流 SHA256=`220b771afbf8ea8d99806f3de27512748e2bd54913b1cc5e1f4a894647314236`，JTAG SRAM DONE bit=1。完整 Block 的统一 DDR3 仲裁、controller/top 和连贯板级闭环仍未完成。
+G2 完整 layer0 Transformer Block 已完成独立验收。`model_tools/transformer_block_reference.py` 从同一组 block hidden state 连贯执行 input RMSNorm、Q/K/V、RoPE、KV Cache、Attention、O_proj、第一处残差、post RMSNorm、gate/up、SiLU、down_proj 和第二处残差；硬件使用统一 11 路 DDR3 仲裁、22 阶段 scheduler/controller 和七矩阵运行时量化。最新完整 `model_tools` 回归 `187/187 PASS`。最终 PDS 详细路由 162 轮后未布线网络为 0、hold 修复 6 轮，物理资源 `29086 LUT / 35053 FF / 52 DRM / 36 APM / 79 IO`；多角时序 `All Constraints Met`，慢角 100 MHz setup WNS=`+0.198 ns`、hold WHS=`+0.141 ns`，快角 setup WNS=`+2.640 ns`、hold WHS=`+0.067 ns`，TNS/THS 全 0，恢复、移除和最小脉宽均通过。验收位流 SHA256=`e4c3494152498583ae4a25540363fe3e828483fa7c0012a117e26e17fc557403`，仅通过 JTAG 下载 SRAM，DONE bit=1，未操作 Flash。四组固定真实 hidden 共 `72/72` 个中间/最终张量逐位 PASS；地址/窗口压力 `8/8 PASS`，含 query=16383 的 KV Cache 末端；交替极值、全正最大、全负最小三组 hidden 共 `54/54` 张量 PASS，并实际覆盖双向残差饱和。最终固件 `PANGU50K G2 BLOCK V1`，`block_error/protocol_error=0`。
 
 ## 当前唯一下一任务
 
 ```text
-继续建立独立的完整 layer0 Transformer Block 集成闭环。运行时量化子系统已经完成自动
-逐位、独立 PnR/多角时序、JTAG SRAM 和真实板卡验收；现在把 22 个计算阶段接入统一 DDR3
-仲裁、`transformer_block_ctrl.v`、`transformer_block_top.v` 和完整 host/PDS 工程，从同一组
-block hidden state 连贯执行到第二处残差，并逐位比较全部关键中间张量和最终 `[896]` 输出。
-完整 Block 通过前不得进入 28 层全模型调度、LM Head 或文本生成。
+G2 单个完整 layer0 Transformer Block 已完成软件、PDS、多角时序、JTAG SRAM、固定真实 hidden、
+地址末端、随机窗口和正负饱和边界闭环。下一步进入阶段 H：建立完整模型分层调度、权重流式加载、
+DDR3 分区与 hidden 双缓冲，先实现从第 0 层到最后一层的逐层执行。当前尚未开始 28 层调度、
+最终 RMSNorm、LM Head、logits 或文本生成，必须继续按 PROJECT_ROADMAP.md 顺序实施。
 ```
 
 详细任务以 `PROJECT_ROADMAP.md` 为准。

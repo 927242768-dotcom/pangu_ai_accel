@@ -84,7 +84,11 @@ endmodule
 // 输入 score： [14,16] signed int64 Q28，INT64_MIN 表示 mask。
 // exp LUT：    513 个 unsigned UQ1.31 uint32 端点，[-16,0]，步长 1/32。
 // 输出概率：   [14,16] unsigned UQ1.31 uint32。
-module softmax_core (
+module softmax_core #(
+    // G2 完整 Block 可启用一拍 score 差值流水；默认关闭以保持既有 F5
+    // 独立验证工程的时序和周期行为不变。
+    parameter integer PIPELINE_SCORE_DIFF = 0
+)(
     input  wire                 clk,
     input  wire                 rst_n,
 
@@ -128,6 +132,7 @@ localparam [4:0] ST_OUT_MUL           = 5'd19;
 localparam [4:0] ST_OUT_ROUND         = 5'd20;
 localparam [4:0] ST_OUT_VALID         = 5'd21;
 localparam [4:0] ST_OUT_WAIT          = 5'd22;
+localparam [4:0] ST_EXP_DECIDE        = 5'd23;
 
 localparam signed [64:0] EXP_MIN_Q28 = -65'sd4294967296; // -16 * 2^28
 localparam [31:0] PROB_ONE = 32'h8000_0000;
@@ -154,6 +159,9 @@ reg [31:0] pending_exp_q31;
 reg [31:0] selected_exp_q31;
 reg selected_output_masked;
 reg [31:0] pending_probability_q31;
+reg        current_score_valid_reg;
+reg signed [64:0] score_difference_reg;
+reg [64:0] difference_magnitude_reg;
 
 reg [6:0] lut_beat_address;
 reg [2:0] lut_lane;
@@ -262,6 +270,9 @@ always @(posedge clk or negedge rst_n) begin
         selected_exp_q31         <= 32'd0;
         selected_output_masked   <= 1'b0;
         pending_probability_q31  <= 32'd0;
+        current_score_valid_reg  <= 1'b0;
+        score_difference_reg     <= 65'sd0;
+        difference_magnitude_reg <= 65'd0;
         lut_beat_address         <= 7'd0;
         lut_lane                 <= 3'd0;
         lut_remainder            <= 23'd0;
@@ -379,7 +390,14 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             ST_EXP_PREP: begin
-                if (!current_score_valid) begin
+                if (PIPELINE_SCORE_DIFF != 0) begin
+                    // 完整 Block 中 token_index 选择、65-bit 差值和后续状态/APM
+                    // 使能组合在同拍会略超 100MHz；先锁存差值再单独判定。
+                    current_score_valid_reg  <= current_score_valid;
+                    score_difference_reg     <= score_difference_q28;
+                    difference_magnitude_reg <= difference_magnitude;
+                    state                    <= ST_EXP_DECIDE;
+                end else if (!current_score_valid) begin
                     pending_exp_q31 <= 32'd0;
                     state           <= ST_EXP_COMMIT;
                 end else if (!score_difference_q28[64]) begin
@@ -394,6 +412,26 @@ always @(posedge clk or negedge rst_n) begin
                     lut_remainder      <= difference_magnitude[22:0];
                     lut_exact_endpoint <= difference_magnitude[32];
                     lut_beat_reg       <= lut_mem[difference_magnitude[32:26]];
+                    state              <= ST_LUT_USE;
+                end
+            end
+
+            ST_EXP_DECIDE: begin
+                if (!current_score_valid_reg) begin
+                    pending_exp_q31 <= 32'd0;
+                    state           <= ST_EXP_COMMIT;
+                end else if (!score_difference_reg[64]) begin
+                    pending_exp_q31 <= PROB_ONE;
+                    state           <= ST_EXP_COMMIT;
+                end else if (score_difference_reg < EXP_MIN_Q28) begin
+                    pending_exp_q31 <= 32'd0;
+                    state           <= ST_EXP_COMMIT;
+                end else begin
+                    lut_beat_address   <= difference_magnitude_reg[32:26];
+                    lut_lane           <= difference_magnitude_reg[25:23];
+                    lut_remainder      <= difference_magnitude_reg[22:0];
+                    lut_exact_endpoint <= difference_magnitude_reg[32];
+                    lut_beat_reg       <= lut_mem[difference_magnitude_reg[32:26]];
                     state              <= ST_LUT_USE;
                 end
             end

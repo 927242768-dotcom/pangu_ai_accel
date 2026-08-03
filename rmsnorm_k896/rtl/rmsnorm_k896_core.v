@@ -13,9 +13,21 @@
 // rsqrt 第一版采用归一化尾数 m∈[1,2) 的 256 项中点 LUT。LUT 由上位机随
 // 固定载荷写入 DDR3，再读入片上缓存；指数奇偶通过 1/sqrt(2) 常数校正。
 module rmsnorm_k896_core #(
-    parameter integer K         = 896,
-    parameter integer DATA_BEATS= K / 16,
-    parameter integer LUT_BEATS = 32
+    parameter integer K              = 896,
+    parameter integer DATA_BEATS     = K / 16,
+    parameter integer LUT_BEATS          = 32,
+    // 完整 G2 Block 可把 variance 前导位搜索与动态规格化移位拆开。
+    parameter integer PIPELINE_NORMALIZE = 0,
+    // 完整 G2 Block 可在 Q20->Q10 RNE 后增加一拍寄存，切断舍入链到
+    // gamma 乘法器的物理长路径。默认关闭，保持 E1/G1 已验证工程周期不变。
+    parameter integer PIPELINE_X_RNE     = 0,
+    // 完整 G2 Block 可再增加一拍 gamma 乘法输入寄存：同时切断
+    // x*rsqrt/RNE -> gamma APM，以及 gamma DRM -> gamma APM 两类后布线长路径。
+    parameter integer PIPELINE_GAMMA_INPUT = 0,
+    // 完整 G2 Block 可把指数符号/绝对值先寄存，再驱动动态移位与 RNE，
+    // 切断 half_exponent 高扇出控制到 rsqrt_scaled_reg 的后布线长路径。
+    // 默认关闭，保持 E1/G1 已验证工程周期与网表结构不变。
+    parameter integer PIPELINE_RSQRT_SHIFT = 0
 )(
     input  wire                    clk,
     input  wire                    rst_n,
@@ -71,6 +83,9 @@ localparam [4:0] ST_OUT_PACK        = 5'd16;
 localparam [4:0] ST_OUT_WAIT        = 5'd17;
 localparam [4:0] ST_OUT_ROUND       = 5'd19;
 localparam [4:0] ST_OUT_SATURATE    = 5'd20;
+localparam [4:0] ST_OUT_X_COMMIT    = 5'd21;
+localparam [4:0] ST_NORMALIZE_SHIFT = 5'd22;
+localparam [4:0] ST_OUT_G_CAPTURE    = 5'd23;
 
 reg [255:0] input_mem [0:DATA_BEATS-1];
 reg [255:0] gamma_mem [0:DATA_BEATS-1];
@@ -91,6 +106,7 @@ reg [10:0] div_remainder;
 reg [5:0]  div_bit_index;
 reg [39:0] variance_q20;
 
+reg [5:0] variance_leading_bit_reg;
 reg [30:0] mantissa_q30;
 reg signed [6:0] exponent_value;
 reg signed [6:0] half_exponent;
@@ -101,11 +117,16 @@ reg [255:0] lut_beat_reg;
 reg [31:0] lut_seed_q20;
 reg [63:0] rsqrt_product;
 reg [63:0] rsqrt_after_constant_reg;
+reg [5:0] half_exponent_magnitude_reg;
+reg half_exponent_negative_reg;
 reg [63:0] rsqrt_scaled_reg;
 reg [31:0] rsqrt_q20;
 
 reg signed [63:0] x_rsqrt_product;
+reg signed [63:0] normalized_rounded_reg;
 reg signed [31:0] normalized_q10;
+reg signed [31:0] gamma_normalized_operand_reg;
+reg signed [15:0] gamma_scale_operand_reg;
 reg signed [63:0] gamma_product;
 reg signed [63:0] output_rounded_reg;
 reg [15:0] output_saturated_reg;
@@ -154,6 +175,17 @@ wire signed [6:0] half_exponent_wire = exponent_wire >>> 1;
 wire exponent_odd_wire = exponent_wire[0];
 wire [7:0] lut_index_wire = normalized_mantissa_wire[29:22];
 
+wire [5:0] mantissa_left_shift_pipelined =
+    6'd30 - variance_leading_bit_reg;
+wire [69:0] variance_shifted_wide_pipelined =
+    {30'd0, variance_q20} << mantissa_left_shift_pipelined;
+wire [30:0] normalized_mantissa_pipelined =
+    variance_shifted_wide_pipelined[30:0];
+wire signed [6:0] exponent_pipelined =
+    $signed({1'b0, variance_leading_bit_reg}) - 7'sd20;
+wire signed [6:0] half_exponent_pipelined = exponent_pipelined >>> 1;
+wire exponent_odd_pipelined = exponent_pipelined[0];
+
 wire [31:0] selected_lut_value =
     lut_beat_reg[lut_lane_index*32 +: 32];
 wire [31:0] exponent_factor_q20 =
@@ -192,12 +224,18 @@ endfunction
 
 wire [5:0] half_exponent_magnitude =
     half_exponent[6] ? -half_exponent : half_exponent;
+wire [5:0] half_exponent_magnitude_active =
+    (PIPELINE_RSQRT_SHIFT != 0) ?
+    half_exponent_magnitude_reg : half_exponent_magnitude;
+wire half_exponent_negative_active =
+    (PIPELINE_RSQRT_SHIFT != 0) ?
+    half_exponent_negative_reg : half_exponent[6];
 wire [63:0] rsqrt_scaled_right =
-    rne_shift_unsigned64(rsqrt_after_constant_reg, half_exponent_magnitude);
+    rne_shift_unsigned64(rsqrt_after_constant_reg, half_exponent_magnitude_active);
 wire [63:0] rsqrt_scaled_left =
-    rsqrt_after_constant_reg << half_exponent_magnitude;
+    rsqrt_after_constant_reg << half_exponent_magnitude_active;
 wire [63:0] rsqrt_scaled_wire =
-    half_exponent[6] ? rsqrt_scaled_left : rsqrt_scaled_right;
+    half_exponent_negative_active ? rsqrt_scaled_left : rsqrt_scaled_right;
 
 function signed [63:0] rne_shift20_signed64;
     input signed [63:0] value;
@@ -248,8 +286,12 @@ wire signed [48:0] x_rsqrt_full =
 wire signed [63:0] x_rsqrt_full_ext = {{15{x_rsqrt_full[48]}}, x_rsqrt_full};
 wire signed [63:0] normalized_rounded_wire =
     rne_shift20_signed64(x_rsqrt_product);
+wire signed [31:0] gamma_normalized_operand =
+    (PIPELINE_GAMMA_INPUT != 0) ? gamma_normalized_operand_reg : normalized_q10;
+wire signed [15:0] gamma_scale_operand =
+    (PIPELINE_GAMMA_INPUT != 0) ? gamma_scale_operand_reg : selected_gamma;
 wire signed [47:0] gamma_product_full =
-    $signed(normalized_q10) * $signed(selected_gamma);
+    $signed(gamma_normalized_operand) * $signed(gamma_scale_operand);
 wire signed [63:0] gamma_product_full_ext =
     {{16{gamma_product_full[47]}}, gamma_product_full};
 wire signed [63:0] output_rounded_wire = rne_shift10_signed64(gamma_product);
@@ -285,8 +327,9 @@ always @(posedge clk or negedge rst_n) begin
         div_remainder       <= 11'd0;
         div_bit_index       <= 6'd0;
         variance_q20        <= 40'd0;
-        mantissa_q30        <= 31'd0;
-        exponent_value      <= 7'sd0;
+        variance_leading_bit_reg <= 6'd0;
+        mantissa_q30             <= 31'd0;
+        exponent_value           <= 7'sd0;
         half_exponent       <= 7'sd0;
         exponent_odd        <= 1'b0;
         lut_index           <= 8'd0;
@@ -295,11 +338,16 @@ always @(posedge clk or negedge rst_n) begin
         lut_seed_q20              <= 32'd0;
         rsqrt_product             <= 64'd0;
         rsqrt_after_constant_reg  <= 64'd0;
+        half_exponent_magnitude_reg <= 6'd0;
+        half_exponent_negative_reg  <= 1'b0;
         rsqrt_scaled_reg          <= 64'd0;
         rsqrt_q20                 <= 32'd0;
-        x_rsqrt_product     <= 64'sd0;
-        normalized_q10      <= 32'sd0;
-        gamma_product       <= 64'sd0;
+        x_rsqrt_product      <= 64'sd0;
+        normalized_rounded_reg       <= 64'sd0;
+        normalized_q10               <= 32'sd0;
+        gamma_normalized_operand_reg  <= 32'sd0;
+        gamma_scale_operand_reg       <= 16'sd0;
+        gamma_product                 <= 64'sd0;
         output_rounded_reg  <= 64'sd0;
         output_saturated_reg<= 16'd0;
         result_data         <= 256'd0;
@@ -374,11 +422,25 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             ST_NORMALIZE: begin
-                mantissa_q30   <= normalized_mantissa_wire;
-                exponent_value <= exponent_wire;
-                half_exponent  <= half_exponent_wire;
-                exponent_odd   <= exponent_odd_wire;
-                lut_index      <= lut_index_wire;
+                if (PIPELINE_NORMALIZE != 0) begin
+                    variance_leading_bit_reg <= variance_leading_bit;
+                    state                    <= ST_NORMALIZE_SHIFT;
+                end else begin
+                    mantissa_q30   <= normalized_mantissa_wire;
+                    exponent_value <= exponent_wire;
+                    half_exponent  <= half_exponent_wire;
+                    exponent_odd   <= exponent_odd_wire;
+                    lut_index      <= lut_index_wire;
+                    state          <= ST_LUT_READ;
+                end
+            end
+
+            ST_NORMALIZE_SHIFT: begin
+                mantissa_q30   <= normalized_mantissa_pipelined;
+                exponent_value <= exponent_pipelined;
+                half_exponent  <= half_exponent_pipelined;
+                exponent_odd   <= exponent_odd_pipelined;
+                lut_index      <= normalized_mantissa_pipelined[29:22];
                 state          <= ST_LUT_READ;
             end
 
@@ -402,7 +464,11 @@ always @(posedge clk or negedge rst_n) begin
             // 避免它们与后级 x*rsqrt 乘法器输入串成一条长组合路径。
             ST_RSQRT_ROUND: begin
                 rsqrt_after_constant_reg <= rsqrt_after_constant_wire;
-                state                    <= ST_RSQRT_SHIFT;
+                if (PIPELINE_RSQRT_SHIFT != 0) begin
+                    half_exponent_magnitude_reg <= half_exponent_magnitude;
+                    half_exponent_negative_reg  <= half_exponent[6];
+                end
+                state <= ST_RSQRT_SHIFT;
             end
 
             ST_RSQRT_SHIFT: begin
@@ -438,8 +504,26 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             ST_OUT_X_ROUND: begin
-                normalized_q10 <= normalized_rounded_wire[31:0];
-                state          <= ST_OUT_G_MULTIPLY;
+                if (PIPELINE_X_RNE != 0) begin
+                    normalized_rounded_reg <= normalized_rounded_wire;
+                    state                  <= ST_OUT_X_COMMIT;
+                end else begin
+                    normalized_q10 <= normalized_rounded_wire[31:0];
+                    state <= (PIPELINE_GAMMA_INPUT != 0) ?
+                             ST_OUT_G_CAPTURE : ST_OUT_G_MULTIPLY;
+                end
+            end
+
+            ST_OUT_X_COMMIT: begin
+                normalized_q10 <= normalized_rounded_reg[31:0];
+                state <= (PIPELINE_GAMMA_INPUT != 0) ?
+                         ST_OUT_G_CAPTURE : ST_OUT_G_MULTIPLY;
+            end
+
+            ST_OUT_G_CAPTURE: begin
+                gamma_normalized_operand_reg <= normalized_q10;
+                gamma_scale_operand_reg      <= selected_gamma;
+                state                        <= ST_OUT_G_MULTIPLY;
             end
 
             ST_OUT_G_MULTIPLY: begin

@@ -4,7 +4,15 @@
 //
 // 两个操作数取绝对值后拆成 4x4 个 16 位 limb。16 个 16x16 部分积
 // 逐项寄存并累加，最后恢复符号。优先保证数学精确和 100 MHz 时序。
-module signed_mul64x64_seq16 (
+module signed_mul64x64_seq16 #(
+    // 完整 G2 Block 可在 APM 部分积寄存与 128 位累加器之间再插入
+    // 一拍对齐寄存，切断 APM tco + 对齐选择 + 宽加法的后布线长路径。
+    // 默认关闭，保持 F4 已验证工程的周期不变。
+    parameter integer PIPELINE_ACCUM = 0,
+    // 完整 G2 可把最终 128 位补码恢复拆成低/高 64 位两拍，
+    // 避免 magnitude_accumulator 到 product 高位的整条进位链。
+    parameter integer PIPELINE_SIGN_RESTORE = 0
+)(
     input  wire                   clk,
     input  wire                   rst_n,
     input  wire                   start,
@@ -15,12 +23,15 @@ module signed_mul64x64_seq16 (
     output reg signed [127:0]     product
 );
 
-localparam [1:0] ST_IDLE    = 2'd0;
-localparam [1:0] ST_PREPARE = 2'd1;
-localparam [1:0] ST_CAPTURE = 2'd2;
-localparam [1:0] ST_ACCUM   = 2'd3;
+localparam [2:0] ST_IDLE     = 3'd0;
+localparam [2:0] ST_PREPARE  = 3'd1;
+localparam [2:0] ST_CAPTURE  = 3'd2;
+localparam [2:0] ST_ACCUM    = 3'd3;
+localparam [2:0] ST_FINALIZE      = 3'd4;
+localparam [2:0] ST_ALIGN         = 3'd5;
+localparam [2:0] ST_FINALIZE_HIGH = 3'd6;
 
-reg [1:0] state;
+reg [2:0] state;
 reg [3:0] step;
 reg result_negative;
 reg [63:0] magnitude_a;
@@ -28,14 +39,18 @@ reg [63:0] magnitude_b;
 reg [15:0] limb_a_reg;
 reg [15:0] limb_b_reg;
 reg [31:0] partial_product_reg;
+reg [127:0] aligned_partial_reg;
 reg [127:0] magnitude_accumulator;
+reg finalize_carry;
 
 reg [15:0] selected_limb_a;
 reg [15:0] selected_limb_b;
 reg [2:0] limb_sum;
 reg [127:0] aligned_partial;
 wire [31:0] partial_product = limb_a_reg * limb_b_reg;
-wire [127:0] next_magnitude = magnitude_accumulator + aligned_partial;
+wire [127:0] accum_partial =
+    (PIPELINE_ACCUM != 0) ? aligned_partial_reg : aligned_partial;
+wire [127:0] next_magnitude = magnitude_accumulator + accum_partial;
 
 always @(*) begin
     case (step[1:0])
@@ -74,7 +89,9 @@ always @(posedge clk or negedge rst_n) begin
         limb_a_reg            <= 16'd0;
         limb_b_reg            <= 16'd0;
         partial_product_reg   <= 32'd0;
+        aligned_partial_reg   <= 128'd0;
         magnitude_accumulator <= 128'd0;
+        finalize_carry        <= 1'b0;
         product               <= 128'sd0;
         busy                  <= 1'b0;
         done                  <= 1'b0;
@@ -100,20 +117,49 @@ always @(posedge clk or negedge rst_n) begin
             end
             ST_CAPTURE: begin
                 partial_product_reg <= partial_product;
+                state <= (PIPELINE_ACCUM != 0) ? ST_ALIGN : ST_ACCUM;
+            end
+            ST_ALIGN: begin
+                aligned_partial_reg <= aligned_partial;
                 state               <= ST_ACCUM;
             end
             ST_ACCUM: begin
+                magnitude_accumulator <= next_magnitude;
                 if (step == 4'd15) begin
+                    // 最后一个部分积先独立写入累加器，下一拍再恢复符号。
+                    // 由此切断“APM 输出 -> 128 位累加 -> 128 位取负 -> product”长路径。
+                    state <= ST_FINALIZE;
+                end else begin
+                    step  <= step + 1'b1;
+                    state <= ST_PREPARE;
+                end
+            end
+            ST_FINALIZE: begin
+                if (PIPELINE_SIGN_RESTORE != 0) begin
+                    if (result_negative) begin
+                        {finalize_carry, product[63:0]} <=
+                            {1'b0, ~magnitude_accumulator[63:0]} + 65'd1;
+                    end else begin
+                        product[63:0] <= magnitude_accumulator[63:0];
+                        finalize_carry <= 1'b0;
+                    end
+                    state <= ST_FINALIZE_HIGH;
+                end else begin
                     product <= result_negative ?
-                        $signed(~next_magnitude + 1'b1) : $signed(next_magnitude);
+                        $signed(~magnitude_accumulator + 1'b1) :
+                        $signed(magnitude_accumulator);
                     busy  <= 1'b0;
                     done  <= 1'b1;
                     state <= ST_IDLE;
-                end else begin
-                    magnitude_accumulator <= next_magnitude;
-                    step                  <= step + 1'b1;
-                    state                 <= ST_PREPARE;
                 end
+            end
+            ST_FINALIZE_HIGH: begin
+                product[127:64] <= result_negative ?
+                    ((~magnitude_accumulator[127:64]) + finalize_carry) :
+                    magnitude_accumulator[127:64];
+                busy  <= 1'b0;
+                done  <= 1'b1;
+                state <= ST_IDLE;
             end
             default: begin
                 state <= ST_IDLE;
@@ -136,7 +182,16 @@ endmodule
 // K : [2,64]  signed int64 Q28，32 beats
 // GQA: q_head 0..6 -> kv_head 0；q_head 7..13 -> kv_head 1
 // score = RNE((sum(Q*K)) / 2^31)，输出 signed int64 Q28
-module attention_score_core (
+module attention_score_core #(
+    parameter integer PIPELINE_MUL_ACCUM = 0,
+    // 完整 G2 可把乘法器最终 128 位符号恢复拆成低/高 64 位两拍。
+    // 默认关闭，保持独立 F4 已验证工程的周期不变。
+    parameter integer PIPELINE_MUL_SIGN = 0,
+    // 完整 G2 可把每维的 128 位 dot_accumulator + mul_product
+    // 拆成低 64 位与高 64 位两拍，切断后布线宽进位链。
+    // 默认关闭，保持独立 F4 已验证工程的周期不变。
+    parameter integer PIPELINE_DOT_ACCUM = 0
+)(
     input  wire                   clk,
     input  wire                   rst_n,
 
@@ -167,6 +222,7 @@ localparam [3:0] ST_DOT_ABS    = 4'd6;
 localparam [3:0] ST_DOT_ROUND  = 4'd7;
 localparam [3:0] ST_DOT_OUT    = 4'd8;
 localparam [3:0] ST_DOT_WAIT   = 4'd9;
+localparam [3:0] ST_DOT_ACCUM_HI = 4'd10;
 
 reg [255:0] q_mem [0:223];
 reg [255:0] k_mem [0:31];
@@ -178,6 +234,11 @@ reg [3:0] q_head;
 reg [5:0] dimension;
 reg signed [127:0] dot_accumulator;
 reg signed [127:0] dot_sum;
+// G2 专用分段累加寄存：低 64 位先计算并保留进位，下一拍完成高 64 位。
+reg [64:0] dot_low_sum_reg;
+reg [63:0] dot_acc_high_reg;
+reg [63:0] mul_high_reg;
+reg dot_accum_last_reg;
 reg dot_negative;
 reg [127:0] dot_magnitude;
 reg [97:0] rounded_magnitude;
@@ -201,6 +262,10 @@ wire [30:0] dot_remainder = dot_magnitude[30:0];
 wire dot_round_up =
     (dot_remainder > 31'h40000000) ||
     ((dot_remainder == 31'h40000000) && dot_quotient[0]);
+wire [64:0] dot_high_sum_ext =
+    {1'b0, dot_acc_high_reg} + {1'b0, mul_high_reg} + dot_low_sum_reg[64];
+wire signed [127:0] dot_split_sum =
+    $signed({dot_high_sum_ext[63:0], dot_low_sum_reg[63:0]});
 
 always @(*) begin
     case (dimension[1:0])
@@ -243,7 +308,10 @@ function [63:0] signed_magnitude_sat64;
     end
 endfunction
 
-signed_mul64x64_seq16 u_signed_mul64x64_seq16 (
+signed_mul64x64_seq16 #(
+    .PIPELINE_ACCUM        (PIPELINE_MUL_ACCUM),
+    .PIPELINE_SIGN_RESTORE (PIPELINE_MUL_SIGN)
+) u_signed_mul64x64_seq16 (
     .clk     (clk),
     .rst_n   (rst_n),
     .start   (mul_start),
@@ -273,6 +341,10 @@ always @(posedge clk or negedge rst_n) begin
         dimension        <= 6'd0;
         dot_accumulator  <= 128'sd0;
         dot_sum          <= 128'sd0;
+        dot_low_sum_reg  <= 65'd0;
+        dot_acc_high_reg <= 64'd0;
+        mul_high_reg     <= 64'd0;
+        dot_accum_last_reg <= 1'b0;
         dot_negative     <= 1'b0;
         dot_magnitude    <= 128'd0;
         rounded_magnitude <= 98'd0;
@@ -337,7 +409,15 @@ always @(posedge clk or negedge rst_n) begin
 
             ST_MUL_WAIT: begin
                 if (mul_done) begin
-                    if (dimension == 6'd63) begin
+                    if (PIPELINE_DOT_ACCUM != 0) begin
+                        // 二补码 128 位加法按低/高 64 位拆分，逐位结果与原表达式一致。
+                        dot_low_sum_reg    <= {1'b0, dot_accumulator[63:0]} +
+                                              {1'b0, mul_product[63:0]};
+                        dot_acc_high_reg   <= dot_accumulator[127:64];
+                        mul_high_reg       <= mul_product[127:64];
+                        dot_accum_last_reg <= (dimension == 6'd63);
+                        state              <= ST_DOT_ACCUM_HI;
+                    end else if (dimension == 6'd63) begin
                         dot_sum <= dot_accumulator + mul_product;
                         state   <= ST_DOT_ABS;
                     end else begin
@@ -345,6 +425,17 @@ always @(posedge clk or negedge rst_n) begin
                         dimension       <= dimension + 1'b1;
                         state           <= ST_READ_VALUE;
                     end
+                end
+            end
+
+            ST_DOT_ACCUM_HI: begin
+                if (dot_accum_last_reg) begin
+                    dot_sum <= dot_split_sum;
+                    state   <= ST_DOT_ABS;
+                end else begin
+                    dot_accumulator <= dot_split_sum;
+                    dimension       <= dimension + 1'b1;
+                    state           <= ST_READ_VALUE;
                 end
             end
 

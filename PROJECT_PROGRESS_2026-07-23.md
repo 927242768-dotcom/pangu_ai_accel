@@ -2090,3 +2090,112 @@ protocol_error = 0
 4. 对全部关键中间张量和最终 `[896]` 输出逐位比较；
 5. 完成完整 Block 的独立 PnR、多角时序、JTAG SRAM、固定真实 hidden 和随机/边界板级压力；
 6. 完整 Block 单独通过前不得进入 28 层调度、LM Head 或文本生成。
+
+
+## 四十二、G2.5 完整 layer0 Transformer Block 板级闭环完成（2026-08-03）
+
+本轮完成 `PROJECT_ROADMAP.md` 中 G2 的最终任务：把此前分别验证的 Attention、MLP 和运行时量化模块整合为同一个 layer0 Transformer Block，并完成最新 RTL 的独立 PDS、多角时序、JTAG SRAM、四组真实 hidden 的 18 张量逐位比较，以及随机、地址末端和正负饱和边界真实板卡验收。
+
+### 1. 最终时序收敛修复
+
+完整 Block 首版物理实现曾出现 Attention 乘法收尾、RoPE 表写使能和 host/AXI 写回确认路径的 setup 违例。最终采用以下不改变逐位数值结果的寄存边界：
+
+- RoPE DDR 返回只使用已寄存的 `ar_seen`，切断 `current_stage/AXI ready -> trig_mem.CE` 高扇出组合路径；
+- Attention Score 的 64×64 顺序乘法器为 G2 增加分段累加和低/高 64 位两拍符号恢复，切断 128 位补码进位链；
+- Attention Output 新增 `ST_ACK_RESULT`，把 DDR 写完成转换为本地寄存的一拍 `core_result_ready`，切断 scheduler/AXI owner 到 100 位累加器使能的组合路径；
+- 上述参数化流水默认关闭，仅完整 G2 实例开启，因此 E1/F4/F5/F6/G1 已验证工程的默认接口和周期保持不变。
+
+修改后重新执行 G2 聚焦回归 `30/30 PASS`，完整 `model_tools` 回归 `187/187 PASS`。
+
+### 2. 最终 PDS、资源、路由与位流
+
+最终验收工程：`transformer_block_g2_output_ack_fix_full`。目标器件与工具为 PDS 2022.2-SP6.4、PGL50H-6IFBG484，placement/route seeds=`5/11`。
+
+- Compile、Synthesize、Device Map、Place & Route、Timing、Bitstream：全部 PASS；
+- 详细路由：162 轮，最终未布线网络 0；
+- hold 修复：6 轮；
+- PnR 实际耗时 34 分 52 秒，峰值内存 2004 MB；
+- Timing：`Design Summary : All Constraints Met`。
+
+资源：
+
+| 阶段 | LUT | FF | Distributed RAM | DRM18K | APM | I/O |
+|---|---:|---:|---:|---:|---:|---:|
+| Device Map | 29011 | 35053 | 332 | 52 | 36 | 79 |
+| 最终 PnR | 29086 | 35053 | 332 | 52 | 36 | 79 |
+
+正式多角时序：
+
+| Corner | Clock | Setup WNS/TNS | Hold WHS/THS |
+|---|---|---|---|
+| Slow | `ref_clk` | `+11.874 ns / 0` | `+0.343 ns / 0` |
+| Slow | `ddrphy_clkin` | `+0.198 ns / 0` | `+0.141 ns / 0` |
+| Slow | `ioclk0/ioclk1` | `+1.692 ns / 0` | `+0.450 ns / 0` |
+| Fast | `ref_clk` | `+14.220 ns / 0` | `+0.266 ns / 0` |
+| Fast | `ddrphy_clkin` | `+2.640 ns / 0` | `+0.067 ns / 0` |
+| Fast | `ioclk0/ioclk1` | `+1.834 ns / 0` | `+0.383 ns / 0` |
+
+所有 slow/fast recovery、removal 和 minimum-pulse-width 检查均无违例。
+
+验收位流：
+
+```text
+transformer_block_g2/pnr/generate_bitstream/transformer_block_top.sbit
+size   = 2101696 B
+SHA256 = e4c3494152498583ae4a25540363fe3e828483fa7c0012a117e26e17fc557403
+```
+
+### 3. JTAG SRAM、固件与驻留参数
+
+`program_transformer_block_sram.tcl` 只执行 `cfg_connect/cfg_scan_chain/cfg_assign_file/cfg_program`。USB Cable II 扫描到 PGL50H，下载进度 100%、DONE bit=1，未执行 Flash 擦除或编程。固件标识为 `PANGU50K G2 BLOCK V1`，DDR3 初始化成功。
+
+22 个 layer0 驻留参数共 7964352 B 全部写入 DDR3，包括七矩阵 INT4 权重、FP16 scale、Q/K/V bias、两组 RMS gamma、RMS/Softmax/SiLU 查表。三个最大权重的上传 SHA256：
+
+- gate：`992b722108b986cd80fac6247c4e591ad5178f1b2437a910254822c69dccedef`；
+- up：`b555608247809ec4c9c18e2603ab60953c303e039071521861b18c7394304112`；
+- down：`db626c292a3b0fbf618c4d64b3a0a858e73e930f5b7beb8804319284f49de577`。
+
+### 4. 四组固定真实 hidden：72/72 张量逐位通过
+
+每组均从当前 hidden 开始运行完整 22 阶段 Block，并逐位回读 `input_norm、Q/K、RoPE Q/K、V、score、probability、attention concat、O_proj、第一处残差、post RMSNorm、gate/up、SiLU、SiLU×up、down_proj、block output` 共 18 个张量。
+
+| query/count | 执行周期 | 18 张量 | 最终输出 SHA256 |
+|---|---:|---:|---|
+| 0/1 | 64666986 | 18/18 PASS | `630952eaf6fe179639773f2b60d1e9e990f380b0e698fa3d493dd7c279c96104` |
+| 1/2 | 64672076 | 18/18 PASS | `1cd96d92e43203abda26cace446c2664a0cbaa1fad29a8658a0d94941fbfbea7` |
+| 5/6 | 65030857 | 18/18 PASS | `b2365afdc2857c543628c9d15fd829005ede98aa99d35a8c4f973f61b35ed9dc` |
+| 15/16 | 66006181 | 18/18 PASS | `c164aab5251afc3954b8689a826a1241d1c7d6757adef5c5a232e127b59a4032` |
+
+累计 `4/4` 用例、`72/72` 张量逐位一致，最终 SHA256 与 Python 固定清单及 G1 第二处残差结果完全相同。
+
+### 5. 随机、地址末端与正负饱和边界
+
+完整 Block 地址/窗口压力 `8/8 PASS`，seed=`20260820`，约 29.114 秒。覆盖 query/count=`0/1、1/2、15/16`，query=`16383`、window=`16368..16383` 的 KV Cache 最后合法窗口，以及四组随机合法 query/window/count；每组均执行完整 Block 并逐位比较最终 `[896]` 输出。
+
+另外构造三组显式 Q6.10 数值边界，并对每组全部 18 张量逐位比较：
+
+| hidden 模式 | 第一处残差饱和 | 第二处残差饱和 | 板卡结果 | 输出 SHA256 |
+|---|---:|---:|---|---|
+| 交替 `INT16_MAX/MIN` | 434 | 443 | 18/18 PASS | `e37229b536f587bbc6ec9976d9052fc340361aec9e7768eb5e3d57aef7ff705b` |
+| 全 `INT16_MAX` | 391 | 456 | 18/18 PASS | `1780b085e23605ead3905e3e141fc0890d3bb48d88acb032ca00fe3ad7389263` |
+| 全 `INT16_MIN` | 403 | 431 | 18/18 PASS | `60a0503e934837bfe2671e846c2544d78356aad9041a91fb416710550f727eb9` |
+
+数值边界累计 `3/3` 用例、`54/54` 张量 PASS，明确覆盖正向、负向及交替极值饱和。
+
+### 6. 最终状态与下一阶段
+
+最终 UART 状态：
+
+```text
+ddr_init_done     = 1
+configured        = 1
+payload_committed = 1
+result_valid      = 1
+block_busy        = 0
+block_error       = 0
+protocol_error    = 0
+stage             = IDLE
+error_code        = 0
+```
+
+G2 单个完整 layer0 Transformer Block 至此完成真实板级闭环。下一步允许进入阶段 H：完整模型分层调度、权重流式加载、DDR3 分区和 hidden 双缓冲。当前尚未实现或验证 28 层连续执行、最终 RMSNorm、LM Head、logits 或文本生成。

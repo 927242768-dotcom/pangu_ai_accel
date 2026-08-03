@@ -60,6 +60,7 @@ localparam [2:0] ST_START_MAC      = 3'd3;
 localparam [2:0] ST_WAIT_MAC       = 3'd4;
 localparam [2:0] ST_MULTIPLY       = 3'd5;
 localparam [2:0] ST_ACCUMULATE_Q28 = 3'd6;
+localparam [2:0] ST_FETCH_BLOCK    = 3'd7;
 
 reg [255:0] activation_mem [0:MAX_ACT_BEATS-1];
 reg [255:0] weight_mem [0:MAX_WEIGHT_BEATS-1];
@@ -70,6 +71,12 @@ reg [2:0] state;
 reg [8:0] block_index;
 reg [8:0] k_blocks_reg;
 reg [6:0] groups_reg;
+// 将宽 RAM 的地址和 4 路 lane 选择从高扇出的 block_index 独立寄存。
+// ST_READ_BLOCK 只复制索引，ST_FETCH_BLOCK 下一拍执行同步 RAM 读取，
+// 防止完整 G2 布局后 block_index 直接扇出到数百个 RAM/APM 端点。
+reg [7:0] act_read_index_reg;
+reg [6:0] weight_read_index_reg;
+reg [1:0] block_lane_reg;
 reg [255:0] act_beat_reg;
 reg [255:0] weight_beat_reg;
 reg [127:0] mac_x_reg;
@@ -91,7 +98,7 @@ wire cfg_consistent =
 wire cfg_valid = cfg_supported && cfg_consistent;
 
 wire [127:0] selected_x_block =
-    block_index[0] ? act_beat_reg[255:128] : act_beat_reg[127:0];
+    block_lane_reg[0] ? act_beat_reg[255:128] : act_beat_reg[127:0];
 reg [63:0] selected_w_block;
 wire [127:0] unpacked_w_block;
 wire dot_valid;
@@ -109,7 +116,7 @@ wire [6:0] current_group_index = block_index[8:2];
 
 integer scale_lane;
 always @(*) begin
-    case (block_index[1:0])
+    case (block_lane_reg)
         2'd0: selected_w_block = weight_beat_reg[63:0];
         2'd1: selected_w_block = weight_beat_reg[127:64];
         2'd2: selected_w_block = weight_beat_reg[191:128];
@@ -152,6 +159,9 @@ always @(posedge clk or negedge rst_n) begin
         block_index             <= 9'd0;
         k_blocks_reg            <= 9'd0;
         groups_reg              <= 7'd0;
+        act_read_index_reg      <= 8'd0;
+        weight_read_index_reg   <= 7'd0;
+        block_lane_reg          <= 2'd0;
         act_beat_reg            <= 256'd0;
         weight_beat_reg         <= 256'd0;
         mac_x_reg               <= 128'd0;
@@ -193,8 +203,15 @@ always @(posedge clk or negedge rst_n) begin
             end
 
             ST_READ_BLOCK: begin
-                act_beat_reg    <= activation_mem[block_index >> 1];
-                weight_beat_reg <= weight_mem[block_index >> 2];
+                act_read_index_reg    <= block_index[8:1];
+                weight_read_index_reg <= block_index[8:2];
+                block_lane_reg        <= block_index[1:0];
+                state                 <= ST_FETCH_BLOCK;
+            end
+
+            ST_FETCH_BLOCK: begin
+                act_beat_reg    <= activation_mem[act_read_index_reg];
+                weight_beat_reg <= weight_mem[weight_read_index_reg];
                 state           <= ST_PREPARE;
             end
 
